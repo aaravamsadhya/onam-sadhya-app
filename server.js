@@ -128,12 +128,25 @@ async function getCouponsForReg(regId, base) {
 app.get('/api/admin/registrations', async (req, res) => {
   if (!checkPin(req.query.pin, 'admin')) return res.json({ success: false, message: 'Invalid admin PIN' });
   try {
-    const r = await pool.query('SELECT * FROM registrations ORDER BY id DESC');
+    const r = await pool.query('SELECT * FROM registrations ORDER BY id ASC');
+    const coupR = await pool.query(
+      'SELECT reg_id, coupon_id, name, type, slot_number, slot_time, checked_in FROM coupons ORDER BY id ASC'
+    );
+    const couponsByReg = {};
+    coupR.rows.forEach(c => {
+      if (!couponsByReg[c.reg_id]) couponsByReg[c.reg_id] = [];
+      couponsByReg[c.reg_id].push({
+        couponId: c.coupon_id, name: c.name, type: c.type,
+        slotNumber: c.slot_number, slotTime: c.slot_time, checkedIn: c.checked_in
+      });
+    });
     const registrations = r.rows.map(row => ({
       regId: row.reg_id, flat: row.flat, contact: row.contact, phone: row.phone,
       adults: row.adult_names, kids: row.kid_names,
       total: row.total, txnRef: row.txn_ref, status: row.status,
-      submittedAt: row.submitted_at
+      submittedAt: row.submitted_at,
+      confirmedBy: row.confirmed_by, confirmedAt: row.confirmed_at,
+      coupons: couponsByReg[row.reg_id] || []
     }));
     res.json({ success: true, registrations });
   } catch (err) {
