@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aaravam - Scanner</title>
+<link href="https://fonts.googleapis.com/css2?family=Yatra+One&family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+  :root{--gold:#F5B70A;--gold-dark:#C9860A;--leaf:#0B6E4F;--leaf-dark:#064E38;--maroon:#8E1B1B;--cream:#FFF8E1;
+        --ok:#0B6E4F;--warn:#C9860A;--bad:#8E1B1B;}
+  *{box-sizing:border-box;}
+  body{font-family:'Poppins',sans-serif;margin:0;background:#111;color:#fff;min-height:100vh;}
+  header{background:linear-gradient(90deg,var(--leaf-dark),var(--leaf));padding:14px 16px;text-align:center;}
+  header h1{font-family:'Yatra One',cursive;font-size:22px;margin:0;}
+  header p{margin:2px 0 0;font-size:12px;opacity:.9;}
+  .wrap{max-width:480px;margin:0 auto;padding:14px;}
+  .card{background:#1c1c1c;border-radius:14px;padding:16px;margin-bottom:14px;}
+  input[type=password]{width:100%;padding:10px 12px;border:1.5px solid #444;border-radius:8px;font-size:16px;background:#000;color:#fff;}
+  button{cursor:pointer;border:none;border-radius:8px;font-family:inherit;font-weight:700;font-size:15px;padding:12px 18px;}
+  .btn-primary{background:var(--leaf);color:#fff;width:100%;margin-top:12px;}
+  .btn-secondary{background:#333;color:#fff;width:100%;margin-top:8px;}
+  .hidden{display:none;}
+  #reader{width:100%;border-radius:12px;overflow:hidden;}
+  .status-card{border-radius:16px;padding:20px;text-align:center;}
+  .status-card.ok{background:linear-gradient(180deg,#0B6E4F,#064E38);}
+  .status-card.warn{background:linear-gradient(180deg,#C9860A,#8E5F06);}
+  .status-card.bad{background:linear-gradient(180deg,#8E1B1B,#5e1010);}
+  .status-icon{font-size:48px;}
+  .status-title{font-size:20px;font-weight:800;margin:6px 0 2px;}
+  .status-sub{font-size:14px;opacity:.9;}
+  .guest-name{font-family:'Yatra One',cursive;font-size:26px;margin:10px 0 2px;}
+  .guest-slot{display:inline-block;margin-top:8px;padding:8px 18px;border-radius:24px;background:rgba(0,0,0,.25);font-weight:700;}
+  .window-warn{margin-top:10px;padding:8px 12px;border-radius:8px;background:rgba(0,0,0,.25);font-size:12px;}
+  .err{color:#ff8080;font-size:13px;margin-top:8px;}
+  #scanCount{font-size:12px;color:#888;text-align:center;}
+</style>
+</head>
+<body>
+<header>
+  <h1>Aaravam</h1>
+  <p>Entry Scanner &middot; DSR White Waters &middot; 5th September 2026</p>
+</header>
+
+<div class="wrap">
+
+  <div class="card" id="pinCard">
+    <label style="font-size:13px;font-weight:600;">Scanner PIN</label>
+    <input type="password" id="pinInput" placeholder="Enter scanner PIN" style="margin-top:6px;">
+    <button class="btn-primary" onclick="login()">Unlock Scanner</button>
+    <div class="err" id="pinErr"></div>
+  </div>
+
+  <div id="scanArea" class="hidden">
+    <div class="card">
+      <div id="reader"></div>
+      <div id="scanCount">Point camera at guest's QR code</div>
+    </div>
+
+    <div class="card hidden" id="resultCard">
+      <div id="statusBox" class="status-card">
+        <div class="status-icon" id="stIcon">•</div>
+        <div class="status-title" id="stTitle">—</div>
+        <div class="status-sub" id="stSub"></div>
+        <div class="guest-name" id="stName"></div>
+        <div id="slotWrap"><span class="guest-slot" id="stSlot"></span></div>
+        <div class="window-warn hidden" id="windowWarn"></div>
+      </div>
+      <button class="btn-primary hidden" id="admitBtn" onclick="admit()">✓ Admit Guest</button>
+      <button class="btn-secondary" onclick="resumeScanning()">Scan Next</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  var PIN = '';
+  var scanner = null;
+  var currentToken = null;
+  var busy = false;
+  var scannedCount = 0;
+
+  async function api(method, url, body){
+    var opts = { method: method, headers: {} };
+    if(body){ opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
+    var r = await fetch(url, opts);
+    return r.json();
+  }
+
+  async function login(){
+    PIN = document.getElementById('pinInput').value;
+    try{
+      var res = await api('POST', '/api/scan/peek', { token: '__pin_test__', pin: PIN });
+      if(res.status === 'bad_pin'){
+        document.getElementById('pinErr').innerText = 'Invalid scanner PIN';
+        return;
+      }
+      document.getElementById('pinCard').classList.add('hidden');
+      document.getElementById('scanArea').classList.remove('hidden');
+      startScanner();
+    }catch(err){
+      document.getElementById('pinErr').innerText = 'Error: ' + err.message;
+    }
+  }
+
+  function startScanner(){
+    scanner = new Html5Qrcode('reader');
+    scanner.start(
+      { facingMode: 'environment' },
+      { fps: 10, qrbox: 240 },
+      onScanSuccess,
+      function(){ /* ignore per-frame errors */ }
+    ).catch(function(err){
+      document.getElementById('reader').innerHTML = '<div style="padding:20px;text-align:center;">Camera error: ' + err + '</div>';
+    });
+  }
+
+  function extractToken(text){
+    try{
+      var url = new URL(text);
+      var t = url.searchParams.get('t');
+      if(t) return t;
+    }catch(e){}
+    var m = text.match(/[?&]t=([^&]+)/);
+    return m ? m[1] : text;
+  }
+
+  async function onScanSuccess(decodedText){
+    if(busy) return;
+    busy = true;
+    scannedCount++;
+    document.getElementById('scanCount').innerText = 'Scans this session: ' + scannedCount;
+    currentToken = extractToken(decodedText);
+    scanner.pause(true);
+    try{
+      var res = await api('POST', '/api/scan/peek', { token: currentToken, pin: PIN });
+      showResult(res);
+    }catch(err){
+      alert('Error looking up coupon: ' + err.message);
+      resumeScanning();
+    }
+  }
+
+  function showResult(res){
+    document.getElementById('resultCard').classList.remove('hidden');
+    var box = document.getElementById('statusBox');
+    var admitBtn = document.getElementById('admitBtn');
+    var warnEl = document.getElementById('windowWarn');
+    warnEl.classList.add('hidden');
+    admitBtn.classList.add('hidden');
+
+    if(!res.found || res.status === 'not_found'){
+      box.className = 'status-card bad';
+      document.getElementById('stIcon').innerText = '✕';
+      document.getElementById('stTitle').innerText = 'NOT RECOGNIZED';
+      document.getElementById('stSub').innerText = 'This QR code does not match any coupon';
+      document.getElementById('stName').innerText = '';
+      document.getElementById('stSlot').innerText = '';
+      return;
+    }
+    if(res.status === 'already_used'){
+      box.className = 'status-card warn';
+      document.getElementById('stIcon').innerText = '⚠';
+      document.getElementById('stTitle').innerText = 'ALREADY CHECKED IN';
+      document.getElementById('stSub').innerText = res.checkedInTime ? ('at ' + res.checkedInTime) : '';
+      document.getElementById('stName').innerText = res.name + (res.type ? ' (' + res.type + ')' : '');
+      document.getElementById('stSlot').innerText = 'Slot ' + res.slotNumber + ' — ' + res.slotTime;
+      return;
+    }
+    if(res.status === 'no_slot'){
+      box.className = 'status-card warn';
+      document.getElementById('stIcon').innerText = '⚠';
+      document.getElementById('stTitle').innerText = 'NO SLOT BOOKED';
+      document.getElementById('stSub').innerText = 'Guest has not selected a slot yet';
+      document.getElementById('stName').innerText = res.name + (res.type ? ' (' + res.type + ')' : '');
+      document.getElementById('stSlot').innerText = '';
+      return;
+    }
+    if(res.status === 'ready'){
+      box.className = 'status-card ok';
+      document.getElementById('stIcon').innerText = '✓';
+      document.getElementById('stTitle').innerText = 'VALID COUPON';
+      document.getElementById('stSub').innerText = 'Not yet checked in';
+      document.getElementById('stName').innerText = res.name + (res.type ? ' (' + res.type + ')' : '');
+      document.getElementById('stSlot').innerText = 'Slot ' + res.slotNumber + ' — ' + res.slotTime;
+      var w = checkWindow(res.slotTime);
+      if(w){
+        warnEl.classList.remove('hidden');
+        warnEl.innerText = w;
+      }
+      admitBtn.classList.remove('hidden');
+    }
+  }
+
+  function checkWindow(slotTimeStr){
+    var m = /(\d+):(\d+)\s*(AM|PM)/i.exec(slotTimeStr || '');
+    if(!m) return null;
+    var h = parseInt(m[1],10), min = parseInt(m[2],10);
+    if(/pm/i.test(m[3]) && h !== 12) h += 12;
+    if(/am/i.test(m[3]) && h === 12) h = 0;
+    var slotStart = new Date();
+    slotStart.setHours(h, min, 0, 0);
+    var winStart = new Date(slotStart.getTime() - 15*60000);
+    var winEnd = new Date(slotStart.getTime() + 45*60000);
+    var now = new Date();
+    if(now < winStart) return 'Early — assigned slot starts at ' + slotTimeStr;
+    if(now > winEnd) return 'Outside assigned slot window (' + slotTimeStr + ') — please confirm before admitting';
+    return null;
+  }
+
+  async function admit(){
+    if(!currentToken) return;
+    try{
+      var res = await api('POST', '/api/scan/checkin', { token: currentToken, pin: PIN });
+      if(res.success){
+        var box = document.getElementById('statusBox');
+        box.className = 'status-card ok';
+        document.getElementById('stIcon').innerText = '✓';
+        document.getElementById('stTitle').innerText = 'ENTRY ALLOWED';
+        document.getElementById('stSub').innerText = 'Checked in just now';
+        document.getElementById('admitBtn').classList.add('hidden');
+        if(navigator.vibrate) navigator.vibrate(150);
+      } else {
+        showResult(res);
+      }
+    }catch(err){
+      alert('Error checking in guest: ' + err.message);
+    }
+  }
+
+  function resumeScanning(){
+    document.getElementById('resultCard').classList.add('hidden');
+    currentToken = null;
+    busy = false;
+    if(scanner) scanner.resume();
+  }
+</script>
+</body>
+</html>

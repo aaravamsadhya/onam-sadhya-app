@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aaravam - Admin</title>
+<link href="https://fonts.googleapis.com/css2?family=Yatra+One&family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{--gold:#F5B70A;--gold-dark:#C9860A;--leaf:#0B6E4F;--leaf-dark:#064E38;--maroon:#8E1B1B;--cream:#FFF8E1;}
+  *{box-sizing:border-box;}
+  body{font-family:'Poppins',sans-serif;margin:0;background:linear-gradient(180deg,#FFF8E1,#FCEFC7);color:#3a2a00;}
+  header{background:linear-gradient(90deg,var(--leaf-dark),var(--leaf));color:#fff;padding:18px 20px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.15);}
+  header h1{font-family:'Yatra One',cursive;font-size:26px;margin:0 0 4px;}
+  header p{margin:0;font-size:13px;opacity:.9;}
+  .wrap{max-width:680px;margin:0 auto;padding:16px;}
+  .card{background:#fff;border-radius:14px;padding:18px;margin-bottom:16px;box-shadow:0 2px 10px rgba(0,0,0,.08);border:1px solid #eee;}
+  .card h2{margin:0 0 12px;font-size:17px;color:var(--leaf-dark);border-bottom:2px solid var(--gold);padding-bottom:6px;}
+  label{display:block;font-size:13px;font-weight:600;margin:10px 0 4px;color:#555;}
+  input[type=text],input[type=password]{width:100%;padding:10px 12px;border:1.5px solid #ddd;border-radius:8px;font-size:15px;font-family:inherit;}
+  button{cursor:pointer;border:none;border-radius:8px;font-family:inherit;font-weight:600;font-size:13px;padding:9px 14px;}
+  .btn-primary{background:var(--leaf);color:#fff;width:100%;margin-top:14px;}
+  .btn-secondary{background:#eee;color:#333;margin-top:8px;}
+  .btn-wa{background:#25D366;color:#fff;}
+  .btn-confirm{background:var(--gold-dark);color:#fff;}
+  .msg{margin-top:10px;padding:10px 12px;border-radius:8px;font-size:13px;display:none;}
+  .msg.err{background:#FDECEA;color:#8E1B1B;display:block;}
+  .msg.ok{background:#E6F4EA;color:#0B6E4F;display:block;}
+  .hidden{display:none;}
+
+  .slot-bar{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #f0f0f0;font-size:13px;}
+  .slot-bar .bar{flex:1;background:#eee;border-radius:6px;height:10px;overflow:hidden;}
+  .slot-bar .fill{height:100%;background:var(--leaf);}
+  .stat-row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;}
+  .stat{flex:1;min-width:110px;background:var(--cream);border-radius:10px;padding:10px;text-align:center;}
+  .stat .n{font-size:20px;font-weight:800;color:var(--leaf-dark);}
+  .stat .l{font-size:11px;color:#8a7a4d;}
+
+  .reg-card{border:1.5px solid #eee;border-radius:12px;padding:12px;margin-bottom:10px;}
+  .reg-head{display:flex;justify-content:space-between;align-items:flex-start;}
+  .reg-flat{font-weight:800;font-size:15px;color:var(--maroon);}
+  .reg-contact{font-size:13px;color:#555;}
+  .pill{padding:2px 10px;border-radius:20px;font-size:11px;font-weight:700;}
+  .pill.pending{background:#FFF3CD;color:#8a6d00;}
+  .pill.confirmed{background:#E6F4EA;color:#0B6E4F;}
+  .reg-people{font-size:12px;color:#777;margin-top:6px;}
+  .reg-actions{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;}
+  .reg-actions button{flex:1;min-width:140px;}
+
+  .result-row{display:flex;justify-content:space-between;align-items:center;padding:8px 4px;border-bottom:1px solid #f2f2f2;font-size:13px;}
+  .pill.yes{background:#E6F4EA;color:#0B6E4F;}
+  .pill.no{background:#f0f0f0;color:#888;}
+</style>
+</head>
+<body>
+<header>
+  <h1>Aaravam</h1>
+  <p>Sadhya Committee Admin &middot; DSR White Waters &middot; 5th September 2026</p>
+</header>
+
+<div class="wrap">
+
+  <div class="card" id="pinCard">
+    <h2>Committee Login</h2>
+    <label>Admin PIN</label>
+    <input type="password" id="pinInput" placeholder="Enter admin PIN">
+    <label>Your Name (for records)</label>
+    <input type="text" id="adminName" placeholder="e.g. Rajiv">
+    <button class="btn-primary" onclick="login()">Unlock</button>
+    <div class="msg err" id="pinMsg"></div>
+  </div>
+
+  <div id="mainArea" class="hidden">
+
+    <div class="card">
+      <h2>Dashboard</h2>
+      <div class="stat-row" id="statRow"></div>
+      <div id="dashSlots"></div>
+      <button class="btn-secondary" onclick="refreshAll()">Refresh</button>
+    </div>
+
+    <div class="card">
+      <h2>Registrations</h2>
+      <div id="regList"></div>
+    </div>
+
+    <div class="card">
+      <h2>Search / Manage Individual Coupons</h2>
+      <input type="text" id="searchQ" placeholder="Search by name, phone, or coupon ID">
+      <button class="btn-secondary" onclick="doSearch()" style="width:100%;margin-top:8px;">Search</button>
+      <div id="searchResults" style="margin-top:10px;"></div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  var PIN = '';
+  var ADMIN_NAME = '';
+
+  async function api(method, url, body){
+    var opts = { method: method, headers: {} };
+    if(body){ opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
+    var r = await fetch(url, opts);
+    if(!r.ok) throw new Error('Server error (' + r.status + ')');
+    return r.json();
+  }
+
+  async function login(){
+    PIN = document.getElementById('pinInput').value;
+    ADMIN_NAME = document.getElementById('adminName').value;
+    try{
+      var dash = await api('GET', '/api/admin/dashboard?pin=' + encodeURIComponent(PIN));
+      if(!dash.success){
+        showMsg('pinMsg', dash.message || 'Invalid PIN', 'err');
+        return;
+      }
+      document.getElementById('pinCard').classList.add('hidden');
+      document.getElementById('mainArea').classList.remove('hidden');
+      renderDashboard(dash);
+      loadRegistrations();
+    }catch(err){
+      showMsg('pinMsg', 'Error: ' + err.message, 'err');
+    }
+  }
+
+  async function refreshAll(){
+    var dash = await api('GET', '/api/admin/dashboard?pin=' + encodeURIComponent(PIN));
+    renderDashboard(dash);
+    loadRegistrations();
+  }
+
+  function renderDashboard(dash){
+    if(!dash.success) return;
+    document.getElementById('statRow').innerHTML =
+      stat(dash.pendingRegs, 'Pending Payments') +
+      stat(dash.confirmedRegs, 'Confirmed Families') +
+      stat(dash.issued, 'Coupons Issued') +
+      stat(dash.booked, 'Slots Booked') +
+      stat(dash.checkedIn, 'Checked In');
+    var html = '';
+    dash.slots.forEach(function(s){
+      var pct = s.capacity ? Math.min(100, Math.round(100*s.booked/s.capacity)) : 0;
+      html += '<div class="slot-bar"><div style="width:130px;">Slot ' + s.number + ' (' + s.time + ')</div>' +
+        '<div class="bar"><div class="fill" style="width:'+pct+'%;"></div></div>' +
+        '<div style="width:70px;text-align:right;">' + s.booked + '/' + s.capacity + '</div></div>';
+    });
+    document.getElementById('dashSlots').innerHTML = html;
+  }
+
+  function stat(n, label){
+    return '<div class="stat"><div class="n">' + n + '</div><div class="l">' + label + '</div></div>';
+  }
+
+  async function loadRegistrations(){
+    document.getElementById('regList').innerHTML = '<div style="color:#888;font-size:13px;">Loading…</div>';
+    var res = await api('GET', '/api/admin/registrations?pin=' + encodeURIComponent(PIN));
+    renderRegistrations(res);
+  }
+
+  function renderRegistrations(res){
+    if(!res.success){ document.getElementById('regList').innerHTML = res.message; return; }
+    if(!res.registrations.length){ document.getElementById('regList').innerHTML = '<div style="color:#888;font-size:13px;">No registrations yet.</div>'; return; }
+    var html = '';
+    res.registrations.forEach(function(r){
+      var isPending = r.status === 'Pending';
+      html += '<div class="reg-card">' +
+        '<div class="reg-head"><div><div class="reg-flat">' + escapeHtml(r.flat) + ' — ' + escapeHtml(r.contact) + '</div>' +
+        '<div class="reg-contact">' + r.phone + ' &middot; ₹' + r.total + (r.txnRef ? (' &middot; Ref: ' + escapeHtml(r.txnRef)) : '') + '</div></div>' +
+        '<span class="pill ' + (isPending?'pending':'confirmed') + '">' + r.status + '</span></div>' +
+        '<div class="reg-people">Adults: ' + ((r.adults||[]).join(', ') || '—') + '<br>Kids: ' + ((r.kids||[]).join(', ') || '—') + '</div>' +
+        '<div class="reg-actions">' +
+        (isPending
+          ? '<button class="btn-confirm" onclick="confirmPayment(\'' + r.regId + '\')">✓ Confirm Payment &amp; Generate Coupons</button>'
+          : '<button class="btn-wa" onclick="shareCoupons(\'' + r.regId + '\')">📱 Share Coupons on WhatsApp</button>' +
+            '<button class="btn-secondary" onclick="shareReminder(\'' + r.regId + '\')">⏰ Send Slot Reminder</button>') +
+        '</div></div>';
+    });
+    document.getElementById('regList').innerHTML = html;
+  }
+
+  async function confirmPayment(regId){
+    if(!confirm('Confirm payment received for ' + regId + '? This will generate individual coupons.')) return;
+    try{
+      var res = await api('POST', '/api/admin/confirm', { regId: regId, pin: PIN, confirmedBy: ADMIN_NAME });
+      if(!res.success){ alert(res.message); return; }
+      await refreshAll();
+      shareCoupons(regId);
+    }catch(err){ alert('Error: ' + err.message); }
+  }
+
+  async function shareCoupons(regId){
+    try{
+      var res = await api('GET', '/api/admin/share-coupons?regId=' + encodeURIComponent(regId) + '&pin=' + encodeURIComponent(PIN));
+      if(!res.success){ alert(res.message); return; }
+      window.open(res.waUrl, '_blank');
+    }catch(err){ alert('Error: ' + err.message); }
+  }
+
+  async function shareReminder(regId){
+    try{
+      var res = await api('GET', '/api/admin/share-reminder?regId=' + encodeURIComponent(regId) + '&pin=' + encodeURIComponent(PIN));
+      if(!res.success){ alert(res.message); return; }
+      window.open(res.waUrl, '_blank');
+    }catch(err){ alert('Error: ' + err.message); }
+  }
+
+  async function doSearch(){
+    var q = document.getElementById('searchQ').value;
+    var res = await api('GET', '/api/admin/search?q=' + encodeURIComponent(q) + '&pin=' + encodeURIComponent(PIN));
+    if(!res.success){ document.getElementById('searchResults').innerHTML = res.message; return; }
+    var html = '';
+    res.results.forEach(function(r){
+      html += '<div class="result-row"><div>' +
+        '<b>' + r.couponId + '</b> — ' + escapeHtml(r.name) + ' (' + r.type + ')<br>' +
+        '<span style="color:#888;">' + (r.phone||'') + (r.slotNumber ? (' &middot; Slot '+r.slotNumber+' ('+r.slotTime+')') : ' &middot; no slot yet') + '</span>' +
+        '</div><div>' +
+        '<span class="pill ' + (r.checkedIn?'yes':'no') + '">' + (r.checkedIn?'Checked in':'Not yet') + '</span> ' +
+        (r.checkedIn ? '<button class="btn-secondary" onclick="doReset(\''+r.couponId+'\')">Undo</button>' : '') +
+        '</div></div>';
+    });
+    document.getElementById('searchResults').innerHTML = html || 'No matches.';
+  }
+
+  async function doReset(id){
+    var res = await api('POST', '/api/admin/reset-checkin', { couponId: id, pin: PIN });
+    if(res.success) doSearch(); else alert(res.message);
+  }
+
+  function escapeHtml(s){
+    return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function showMsg(elId, text, cls){
+    var el = document.getElementById(elId);
+    el.className = 'msg ' + cls;
+    el.innerText = text;
+  }
+</script>
+</body>
+</html>
+      

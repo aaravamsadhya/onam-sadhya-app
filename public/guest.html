@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aaravam - Your Coupon</title>
+<link href="https://fonts.googleapis.com/css2?family=Yatra+One&family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<style>
+  :root{--gold:#F5B70A;--gold-dark:#C9860A;--leaf:#0B6E4F;--leaf-dark:#064E38;--maroon:#8E1B1B;--cream:#FFF8E1;}
+  *{box-sizing:border-box;}
+  body{font-family:'Poppins',sans-serif;margin:0;background:linear-gradient(180deg,#FFF8E1,#FCEFC7);color:#3a2a00;min-height:100vh;}
+  header{background:linear-gradient(90deg,var(--leaf-dark),var(--leaf));color:#fff;padding:20px 16px;text-align:center;}
+  header h1{font-family:'Yatra One',cursive;font-size:28px;margin:0 0 4px;}
+  header p{margin:0;font-size:13px;opacity:.9;}
+  .wrap{max-width:480px;margin:0 auto;padding:16px;}
+  .card{background:#fff;border-radius:14px;padding:18px;margin-bottom:16px;box-shadow:0 2px 10px rgba(0,0,0,.08);border:1px solid #eee;}
+  .coupon{border-radius:16px;overflow:hidden;border:3px solid var(--gold-dark);background:var(--cream);text-align:center;}
+  .coupon-top,.coupon-bottom{background:repeating-linear-gradient(135deg,var(--leaf) 0 10px,var(--leaf-dark) 10px 20px);height:10px;}
+  .coupon-head{background:linear-gradient(90deg,var(--gold),#FFD75E);padding:14px 10px 10px;}
+  .coupon-head h2{font-family:'Yatra One',cursive;margin:0;font-size:24px;color:var(--maroon);}
+  .coupon-head p{margin:2px 0 0;font-size:12px;color:#5a3d00;font-weight:600;}
+  .coupon-body{padding:18px;}
+  #qrHolder{display:inline-block;background:#fff;padding:10px;border-radius:10px;border:2px dashed var(--gold-dark);}
+  .coupon-id{font-size:22px;font-weight:800;color:var(--maroon);margin-top:10px;}
+  .coupon-name{font-size:17px;font-weight:700;color:var(--leaf-dark);margin-top:2px;}
+  .type-badge{display:inline-block;margin-top:4px;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;background:#fff;border:1px solid var(--gold-dark);color:var(--gold-dark);}
+  .slot-badge{display:inline-block;margin-top:12px;padding:8px 16px;border-radius:24px;background:var(--leaf);color:#fff;font-weight:700;font-size:14px;}
+  .slot-badge.none{background:#eee;color:#888;}
+  .coupon-foot{background:var(--leaf-dark);color:#fff;font-size:11px;padding:8px;}
+
+  h3{font-size:16px;color:var(--leaf-dark);margin:0 0 12px;border-bottom:2px solid var(--gold);padding-bottom:6px;}
+  .slot-option{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;border:1.5px solid #e2d9b8;border-radius:10px;margin-bottom:8px;cursor:pointer;background:#fffdf5;}
+  .slot-option:hover{border-color:var(--leaf);}
+  .slot-option.full{opacity:.45;cursor:not-allowed;background:#f5f5f5;}
+  .slot-option.selected{border-color:var(--leaf);background:#E6F4EA;}
+  .slot-time{font-weight:700;font-size:15px;color:#333;}
+  .slot-remain{font-size:12px;color:#777;}
+  .slot-remain.low{color:var(--maroon);font-weight:700;}
+  .msg{margin-top:10px;padding:10px 12px;border-radius:8px;font-size:13px;display:none;}
+  .msg.err{background:#FDECEA;color:#8E1B1B;display:block;}
+  .msg.ok{background:#E6F4EA;color:#0B6E4F;display:block;}
+  .center{text-align:center;color:#888;font-size:14px;padding:20px;}
+  button.linklike{background:none;border:none;color:var(--leaf-dark);text-decoration:underline;font-size:13px;cursor:pointer;padding:0;margin-top:10px;}
+  .hidden{display:none;}
+</style>
+</head>
+<body>
+<header>
+  <h1>Aaravam</h1>
+  <p>Onam Sadhya Coupon &middot; DSR White Waters Clubhouse &middot; 5th September 2026</p>
+</header>
+
+<div class="wrap">
+  <div id="loading" class="card center">Loading your coupon…</div>
+
+  <div id="invalidCard" class="card center hidden">
+    This link doesn't match a valid coupon. Please use the link from the QR code on your coupon, or contact the Sadhya committee.
+  </div>
+
+  <div id="content" class="hidden">
+    <div class="card">
+      <div class="coupon">
+        <div class="coupon-top"></div>
+        <div class="coupon-head">
+          <h2>Aaravam</h2>
+          <p>Sadhya Coupon &middot; 2026</p>
+        </div>
+        <div class="coupon-body">
+          <div id="qrHolder"></div>
+          <div class="coupon-id" id="cId"></div>
+          <div class="coupon-name" id="cName"></div>
+          <div class="type-badge" id="cType"></div>
+          <div id="slotBadge" class="slot-badge none">No slot selected yet</div>
+        </div>
+        <div class="coupon-foot">Show this QR at the clubhouse entrance</div>
+        <div class="coupon-bottom"></div>
+      </div>
+    </div>
+
+    <div class="card" id="slotCard">
+      <h3 id="slotHeading">Select Your Sadhya Slot</h3>
+      <div id="slotList"></div>
+      <div class="msg" id="slotMsg"></div>
+      <button class="linklike hidden" id="changeBtn" onclick="showSlotPicker()">Change my slot</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  var TOKEN = new URLSearchParams(window.location.search).get('t') || '';
+  var myInfo = null;
+
+  function el(id){ return document.getElementById(id); }
+
+  async function api(method, url, body){
+    var opts = { method: method, headers: {} };
+    if(body){ opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
+    var r = await fetch(url, opts);
+    return r.json();
+  }
+
+  async function init(){
+    if(!TOKEN){
+      el('loading').classList.add('hidden');
+      el('invalidCard').classList.remove('hidden');
+      return;
+    }
+    try{
+      var info = await api('GET', '/api/coupon?t=' + encodeURIComponent(TOKEN));
+      el('loading').classList.add('hidden');
+      if(!info.found){
+        el('invalidCard').classList.remove('hidden');
+        return;
+      }
+      myInfo = info;
+      el('content').classList.remove('hidden');
+      el('cId').innerText = info.couponId;
+      el('cName').innerText = info.name;
+      el('cType').innerText = info.type || '';
+      new QRCode(el('qrHolder'), {text: window.location.href, width:150, height:150, colorDark:'#064E38', colorLight:'#ffffff'});
+      if(info.slotNumber){
+        el('slotBadge').classList.remove('none');
+        el('slotBadge').innerText = 'Slot ' + info.slotNumber + ' — ' + info.slotTime;
+        el('changeBtn').classList.remove('hidden');
+        el('slotHeading').innerText = 'Your Slot';
+        renderBookedState();
+      } else {
+        loadSlots();
+      }
+    }catch(err){
+      el('loading').classList.add('hidden');
+      el('invalidCard').classList.remove('hidden');
+      el('invalidCard').innerText = 'Something went wrong loading your coupon: ' + err.message;
+    }
+  }
+
+  function renderBookedState(){
+    el('slotList').innerHTML = '<div class="center" style="padding:6px;">You\'re booked for <b>Slot ' + myInfo.slotNumber + ' (' + myInfo.slotTime + ')</b>. Please arrive on time and show your QR at entry.</div>';
+  }
+
+  function showSlotPicker(){
+    el('slotHeading').innerText = 'Change Your Slot';
+    el('changeBtn').classList.add('hidden');
+    loadSlots();
+  }
+
+  async function loadSlots(){
+    el('slotList').innerHTML = '<div class="center">Loading slots…</div>';
+    var slots = await api('GET', '/api/slots');
+    renderSlots(slots);
+  }
+
+  function renderSlots(slots){
+    var html = '';
+    slots.forEach(function(s){
+      var isFull = s.remaining <= 0 && String(s.number) !== String(myInfo.slotNumber);
+      var isMine = String(s.number) === String(myInfo.slotNumber);
+      html += '<div class="slot-option ' + (isFull?'full':'') + (isMine?' selected':'') + '" ' +
+        (isFull ? '' : 'onclick="pick(' + s.number + ')"') + '>' +
+        '<div><div class="slot-time">Slot ' + s.number + ' — ' + s.time + '</div></div>' +
+        '<div class="slot-remain ' + (s.remaining<=15 && s.remaining>0 ? 'low':'') + '">' +
+        (isFull ? 'FULL' : s.remaining + ' seats left') + '</div></div>';
+    });
+    el('slotList').innerHTML = html;
+  }
+
+  async function pick(slotNumber){
+    try{
+      var res = await api('POST', '/api/book-slot', { token: TOKEN, slotNumber: slotNumber });
+      if(!res.success){
+        showMsg(res.message, 'err');
+        return;
+      }
+      myInfo.slotNumber = res.slotNumber;
+      myInfo.slotTime = res.slotTime;
+      el('slotBadge').classList.remove('none');
+      el('slotBadge').innerText = 'Slot ' + res.slotNumber + ' — ' + res.slotTime;
+      el('changeBtn').classList.remove('hidden');
+      el('slotHeading').innerText = 'Your Slot';
+      showMsg('Slot confirmed! See you on 5th Sept.', 'ok');
+      renderBookedState();
+    }catch(err){
+      showMsg('Something went wrong: ' + err.message, 'err');
+    }
+  }
+
+  function showMsg(text, cls){
+    var m = el('slotMsg');
+    m.className = 'msg ' + cls;
+    m.innerText = text;
+    setTimeout(function(){ m.className = 'msg'; }, 4000);
+  }
+
+  init();
+</script>
+</body>
+</html>
