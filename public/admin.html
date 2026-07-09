@@ -49,6 +49,16 @@
   .result-row{display:flex;justify-content:space-between;align-items:center;padding:8px 4px;border-bottom:1px solid #f2f2f2;font-size:13px;}
   .pill.yes{background:#E6F4EA;color:#0B6E4F;}
   .pill.no{background:#f0f0f0;color:#888;}
+
+  .sno{display:inline-block;min-width:22px;background:var(--cream);color:var(--leaf-dark);font-weight:800;font-size:11px;border-radius:6px;padding:2px 6px;margin-right:6px;}
+  .reg-id{font-weight:800;color:var(--leaf-dark);}
+  .phone-link{color:#3a2a00;text-decoration:none;border-bottom:1px dotted #999;}
+  .coupon-chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px;}
+  .chip{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:700;padding:3px 8px;border-radius:12px;background:#f0f0f0;color:#555;}
+  .chip.checkedin{background:#E6F4EA;color:#0B6E4F;}
+  .chip.noslot{background:#FFF3CD;color:#8a6d00;}
+  .empty-note{color:#999;font-size:13px;padding:8px 0;}
+  #regFilter{margin-bottom:4px;}
 </style>
 </head>
 <body>
@@ -82,8 +92,22 @@
     </div>
 
     <div class="card">
-      <h2>Registrations</h2>
-      <div id="regList"></div>
+      <h2>Confirmed Summary</h2>
+      <div class="stat-row" id="confirmedStatRow"></div>
+    </div>
+
+    <div class="card">
+      <input type="text" id="regFilter" placeholder="🔍 Filter registrations by flat, name, phone or reg ID" oninput="applyRegFilter()">
+    </div>
+
+    <div class="card">
+      <h2>Pending Registrations <span class="pill pending" id="pendingCountBadge">0</span></h2>
+      <div id="pendingList"></div>
+    </div>
+
+    <div class="card">
+      <h2>Confirmed Registrations <span class="pill confirmed" id="confirmedCountBadge">0</span></h2>
+      <div id="confirmedList"></div>
     </div>
 
     <div class="card">
@@ -158,31 +182,105 @@
     return '<div class="stat"><div class="n">' + n + '</div><div class="l">' + label + '</div></div>';
   }
 
+  var ALL_REGS = [];
+
   async function loadRegistrations(){
-    document.getElementById('regList').innerHTML = '<div style="color:#888;font-size:13px;">Loading…</div>';
+    document.getElementById('pendingList').innerHTML = '<div class="empty-note">Loading…</div>';
+    document.getElementById('confirmedList').innerHTML = '<div class="empty-note">Loading…</div>';
     var res = await api('GET', '/api/admin/registrations?pin=' + encodeURIComponent(PIN));
-    renderRegistrations(res);
+    if(!res.success){
+      document.getElementById('pendingList').innerHTML = res.message;
+      document.getElementById('confirmedList').innerHTML = '';
+      return;
+    }
+    ALL_REGS = res.registrations || [];
+    renderAll();
   }
 
-  function renderRegistrations(res){
-    if(!res.success){ document.getElementById('regList').innerHTML = res.message; return; }
-    if(!res.registrations.length){ document.getElementById('regList').innerHTML = '<div style="color:#888;font-size:13px;">No registrations yet.</div>'; return; }
-    var html = '';
-    res.registrations.forEach(function(r){
-      var isPending = r.status === 'Pending';
-      html += '<div class="reg-card">' +
-        '<div class="reg-head"><div><div class="reg-flat">' + escapeHtml(r.flat) + ' — ' + escapeHtml(r.contact) + '</div>' +
-        '<div class="reg-contact">' + r.phone + ' &middot; ₹' + r.total + (r.txnRef ? (' &middot; Ref: ' + escapeHtml(r.txnRef)) : '') + '</div></div>' +
-        '<span class="pill ' + (isPending?'pending':'confirmed') + '">' + r.status + '</span></div>' +
-        '<div class="reg-people">Adults: ' + ((r.adults||[]).join(', ') || '—') + '<br>Kids: ' + ((r.kids||[]).join(', ') || '—') + '</div>' +
-        '<div class="reg-actions">' +
-        (isPending
-          ? '<button class="btn-confirm" onclick="confirmPayment(\'' + r.regId + '\')">✓ Confirm Payment &amp; Generate Coupons</button>'
-          : '<button class="btn-wa" onclick="shareCoupons(\'' + r.regId + '\')">📱 Share Coupons on WhatsApp</button>' +
-            '<button class="btn-secondary" onclick="shareReminder(\'' + r.regId + '\')">⏰ Send Slot Reminder</button>') +
-        '</div></div>';
-    });
-    document.getElementById('regList').innerHTML = html;
+  function applyRegFilter(){ renderAll(); }
+
+  function matchesFilter(r, q){
+    if(!q) return true;
+    q = q.toLowerCase();
+    return (r.flat||'').toLowerCase().indexOf(q) > -1 ||
+      (r.contact||'').toLowerCase().indexOf(q) > -1 ||
+      (r.phone||'').toLowerCase().indexOf(q) > -1 ||
+      (r.regId||'').toLowerCase().indexOf(q) > -1 ||
+      (r.adults||[]).some(function(n){ return (n||'').toLowerCase().indexOf(q) > -1; }) ||
+      (r.kids||[]).some(function(n){ return (n||'').toLowerCase().indexOf(q) > -1; });
+  }
+
+  function renderAll(){
+    var q = document.getElementById('regFilter').value;
+    var filtered = ALL_REGS.filter(function(r){ return matchesFilter(r, q); });
+    var pending = filtered.filter(function(r){ return r.status === 'Pending'; });
+    var confirmed = filtered.filter(function(r){ return r.status === 'Confirmed'; });
+
+    var allConfirmed = ALL_REGS.filter(function(r){ return r.status === 'Confirmed'; });
+    var totalAdults = allConfirmed.reduce(function(s,r){ return s + (r.adults||[]).length; }, 0);
+    var totalKids = allConfirmed.reduce(function(s,r){ return s + (r.kids||[]).length; }, 0);
+    var totalRevenue = allConfirmed.reduce(function(s,r){ return s + (r.total||0); }, 0);
+    document.getElementById('confirmedStatRow').innerHTML =
+      stat(allConfirmed.length, 'Confirmed Registrations') +
+      stat(totalAdults, 'Total Adults') +
+      stat(totalKids, 'Total Kids') +
+      stat(totalAdults + totalKids, 'Total People') +
+      stat('₹' + totalRevenue, 'Revenue Confirmed');
+
+    document.getElementById('pendingCountBadge').innerText = pending.length;
+    document.getElementById('confirmedCountBadge').innerText = confirmed.length;
+
+    document.getElementById('pendingList').innerHTML = pending.length
+      ? pending.map(renderPendingRow).join('')
+      : '<div class="empty-note">' + (q ? 'No matches.' : 'No pending registrations.') + '</div>';
+
+    document.getElementById('confirmedList').innerHTML = confirmed.length
+      ? confirmed.map(renderConfirmedRow).join('')
+      : '<div class="empty-note">' + (q ? 'No matches.' : 'No confirmed registrations yet.') + '</div>';
+  }
+
+  function phoneLink(phone){
+    if(!phone) return '';
+    return '<a class="phone-link" href="tel:+' + phone + '">' + phone + '</a>';
+  }
+
+  function renderPendingRow(r, i){
+    return '<div class="reg-card">' +
+      '<div class="reg-head"><div><span class="sno">' + (i+1) + '</span>' +
+      '<span class="reg-id">' + r.regId + '</span> — ' + escapeHtml(r.flat) + ' — ' + escapeHtml(r.contact) + '</div>' +
+      '<span class="pill pending">Pending</span></div>' +
+      '<div class="reg-contact" style="margin-top:4px;">' + phoneLink(r.phone) + ' &middot; ₹' + r.total +
+      (r.txnRef ? (' &middot; Ref: ' + escapeHtml(r.txnRef)) : '') + '</div>' +
+      '<div class="reg-people">Adults: ' + ((r.adults||[]).join(', ') || '—') + '<br>Kids: ' + ((r.kids||[]).join(', ') || '—') + '</div>' +
+      '<div class="reg-actions">' +
+      '<button class="btn-confirm" onclick="confirmPayment(\'' + r.regId + '\')">✓ Confirm Payment &amp; Generate Coupons</button>' +
+      '</div></div>';
+  }
+
+  function couponChip(c){
+    var cls = 'chip';
+    var label = c.couponId + ' (' + (c.type==='Adult'?'A':'K') + ')';
+    var title = c.name;
+    if(c.checkedIn){ cls += ' checkedin'; label += ' ✓'; title += ' — Checked in'; }
+    else if(c.slotNumber){ title += ' — Slot ' + c.slotNumber + ' (' + c.slotTime + ')'; }
+    else { cls += ' noslot'; title += ' — No slot booked yet'; }
+    return '<span class="' + cls + '" title="' + escapeHtml(title) + '">' + escapeHtml(label) + '</span>';
+  }
+
+  function renderConfirmedRow(r, i){
+    var chips = (r.coupons||[]).map(couponChip).join('');
+    return '<div class="reg-card">' +
+      '<div class="reg-head"><div><span class="sno">' + (i+1) + '</span>' +
+      '<span class="reg-id">' + r.regId + '</span> — ' + escapeHtml(r.flat) + ' — ' + escapeHtml(r.contact) + '</div>' +
+      '<span class="pill confirmed">Confirmed</span></div>' +
+      '<div class="reg-contact" style="margin-top:4px;">' + phoneLink(r.phone) + ' &middot; ₹' + r.total +
+      (r.confirmedBy ? (' &middot; Confirmed by ' + escapeHtml(r.confirmedBy)) : '') + '</div>' +
+      '<div class="reg-people">Adults: ' + ((r.adults||[]).join(', ') || '—') + '<br>Kids: ' + ((r.kids||[]).join(', ') || '—') + '</div>' +
+      '<div class="coupon-chips">' + (chips || '<span class="empty-note">No coupons found</span>') + '</div>' +
+      '<div class="reg-actions">' +
+      '<button class="btn-wa" onclick="shareCoupons(\'' + r.regId + '\')">📱 Share Coupons on WhatsApp</button>' +
+      '<button class="btn-secondary" onclick="shareReminder(\'' + r.regId + '\')">⏰ Send Slot Reminder</button>' +
+      '</div></div>';
   }
 
   async function confirmPayment(regId){
