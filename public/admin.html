@@ -75,7 +75,10 @@
       <h2>Dashboard</h2>
       <div class="stat-row" id="statRow"></div>
       <div id="dashSlots"></div>
-      <button class="btn-secondary" onclick="refreshAll()">Refresh</button>
+      <div style="display:flex;gap:8px;margin-top:8px;">
+        <button class="btn-secondary" onclick="refreshAll()" style="flex:1;">Refresh</button>
+        <button class="btn-confirm" onclick="downloadReport()" style="flex:1;">⬇ Download Excel Report</button>
+      </div>
     </div>
 
     <div class="card">
@@ -127,6 +130,10 @@
     var dash = await api('GET', '/api/admin/dashboard?pin=' + encodeURIComponent(PIN));
     renderDashboard(dash);
     loadRegistrations();
+  }
+
+  function downloadReport(){
+    window.location.href = '/api/admin/export?pin=' + encodeURIComponent(PIN);
   }
 
   function renderDashboard(dash){
@@ -238,4 +245,3 @@
 </script>
 </body>
 </html>
-      
