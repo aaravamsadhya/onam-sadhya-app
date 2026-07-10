@@ -14,6 +14,10 @@
   header{background:linear-gradient(90deg,var(--leaf-dark),var(--leaf));padding:14px 16px;text-align:center;}
   header h1{font-family:'Yatra One',cursive;font-size:22px;margin:0;}
   header p{margin:2px 0 0;font-size:12px;opacity:.9;}
+  .kasavu-strip{height:8px;background:repeating-linear-gradient(90deg,var(--gold) 0 10px,var(--gold-dark) 10px 14px,var(--maroon) 14px 20px,var(--gold-dark) 20px 24px);}
+  .slot-chip{display:inline-block;padding:2px 10px;border-radius:12px;font-size:12px;font-weight:700;color:#111;}
+  .legend-row{display:flex;align-items:center;gap:10px;padding:5px 0;font-size:13px;}
+  .legend-row .sw{width:18px;height:18px;border-radius:5px;flex:0 0 auto;}
   .wrap{max-width:480px;margin:0 auto;padding:14px;}
   .card{background:#1c1c1c;border-radius:14px;padding:16px;margin-bottom:14px;}
   input[type=password]{width:100%;padding:10px 12px;border:1.5px solid #444;border-radius:8px;font-size:16px;background:#000;color:#fff;}
@@ -47,8 +51,9 @@
 <body>
 <header>
   <h1>Aaravam</h1>
-  <p>Entry Scanner &middot; DSR White Waters &middot; 5th September 2026</p>
+  <p>Entry Scanner</p>
 </header>
+<div class="kasavu-strip"></div>
 
 <div class="wrap">
 
@@ -60,6 +65,11 @@
   </div>
 
   <div id="scanArea" class="hidden">
+    <div class="card" id="legendCard">
+      <div style="font-weight:700;margin-bottom:4px;font-size:13px;">Slot colours (for a quick no-scan check at a glance)</div>
+      <div id="legendList"></div>
+    </div>
+
     <div class="card">
       <div id="reader"></div>
       <div id="scanCount">Point camera at guest's QR code</div>
@@ -105,6 +115,22 @@
     return r.json();
   }
 
+  // Each slot gets its own colour so the gate can validate a guest's coupon just by eye -
+  // compare the colour shown on their phone against this legend - without needing to scan
+  // every single QR code, which matters when the queue is long or a phone won't scan cleanly.
+  var SLOT_COLORS = ['#F5B70A', '#0B6E4F', '#8E1B1B', '#1565C0', '#6A3AA8'];
+  function slotColor(n){ return SLOT_COLORS[(Number(n) - 1 + SLOT_COLORS.length) % SLOT_COLORS.length]; }
+  function slotTextColor(n){ return Number(n) === 1 ? '#111' : '#fff'; }
+
+  function renderLegend(){
+    var html = '';
+    SLOTS.forEach(function(s){
+      html += '<div class="legend-row"><div class="sw" style="background:' + slotColor(s.number) + ';"></div>' +
+        '<div>Slot ' + s.number + ' — ' + s.time + '</div></div>';
+    });
+    document.getElementById('legendList').innerHTML = html || '<div style="font-size:12px;color:#888;">No slots configured.</div>';
+  }
+
   async function login(){
     PIN = document.getElementById('pinInput').value;
     try{
@@ -116,6 +142,7 @@
       document.getElementById('pinCard').classList.add('hidden');
       document.getElementById('scanArea').classList.remove('hidden');
       try{ SLOTS = await api('GET', '/api/slots'); }catch(e){ SLOTS = []; }
+      renderLegend();
       startScanner();
     }catch(err){
       document.getElementById('pinErr').innerText = 'Error: ' + err.message;
@@ -149,7 +176,13 @@
     scanner = new Html5Qrcode('reader');
     scanner.start(
       { facingMode: 'environment' },
-      { fps: 10, qrbox: 240 },
+      {
+        fps: 15, qrbox: 240,
+        // On phones whose browser supports it (most modern Android Chrome), this uses the
+        // device's native, hardware-accelerated barcode reader instead of scanning frames in
+        // JavaScript - this is the main lever for cutting down scan-to-result delay at the gate.
+        experimentalFeatures: { useBarCodeDetectorIfSupported: true }
+      },
       onScanSuccess,
       function(){ /* ignore per-frame errors */ }
     ).catch(function(err){
@@ -183,6 +216,19 @@
     }
   }
 
+  function setSlotChip(number, time){
+    var el = document.getElementById('stSlot');
+    if(!number){
+      el.innerText = '';
+      el.style.background = '';
+      el.style.color = '';
+      return;
+    }
+    el.innerText = 'Slot ' + number + ' — ' + time;
+    el.style.background = slotColor(number);
+    el.style.color = slotTextColor(number);
+  }
+
   function showResult(res){
     lastResult = res;
     document.getElementById('resultCard').classList.remove('hidden');
@@ -203,7 +249,7 @@
       document.getElementById('stTitle').innerText = 'NOT RECOGNIZED';
       document.getElementById('stSub').innerText = 'This QR code does not match any coupon';
       document.getElementById('stName').innerText = '';
-      document.getElementById('stSlot').innerText = '';
+      setSlotChip(null);
       return;
     }
     if(res.status === 'disabled'){
@@ -212,7 +258,7 @@
       document.getElementById('stTitle').innerText = 'COUPON CANCELLED';
       document.getElementById('stSub').innerText = 'This coupon was disabled by the committee';
       document.getElementById('stName').innerText = res.name + (res.type ? ' (' + res.type + ')' : '');
-      document.getElementById('stSlot').innerText = '';
+      setSlotChip(null);
       return;
     }
 
@@ -226,7 +272,7 @@
       document.getElementById('stTitle').innerText = 'ALREADY CHECKED IN';
       document.getElementById('stSub').innerText = res.checkedInTime ? ('at ' + res.checkedInTime) : '';
       document.getElementById('stName').innerText = res.name + (res.type ? ' (' + res.type + ')' : '');
-      document.getElementById('stSlot').innerText = 'Slot ' + res.slotNumber + ' — ' + res.slotTime;
+      setSlotChip(res.slotNumber, res.slotTime);
       return;
     }
     if(res.status === 'no_slot'){
@@ -235,7 +281,7 @@
       document.getElementById('stTitle').innerText = 'NO SLOT BOOKED';
       document.getElementById('stSub').innerText = 'Guest has not selected a slot yet';
       document.getElementById('stName').innerText = res.name + (res.type ? ' (' + res.type + ')' : '');
-      document.getElementById('stSlot').innerText = '';
+      setSlotChip(null);
       var running0 = getRunningSlot();
       if(running0){
         overrideBtn.innerText = '↪ Book into Slot ' + running0.number + ' (' + running0.time + ') & Admit';
@@ -249,7 +295,7 @@
       document.getElementById('stTitle').innerText = 'VALID COUPON';
       document.getElementById('stSub').innerText = 'Not yet checked in';
       document.getElementById('stName').innerText = res.name + (res.type ? ' (' + res.type + ')' : '');
-      document.getElementById('stSlot').innerText = 'Slot ' + res.slotNumber + ' — ' + res.slotTime;
+      setSlotChip(res.slotNumber, res.slotTime);
       var w = checkWindow(res.slotTime);
       if(w){
         warnEl.classList.remove('hidden');
@@ -338,8 +384,10 @@
       res.members.forEach(function(m){
         var disabled = m.checkedIn;
         var note = m.checkedIn ? 'Already checked in' : (m.slotNumber ? 'Slot ' + m.slotNumber + ' (' + m.slotTime + ')' : 'No slot booked');
+        var swatch = m.slotNumber ? '<div class="sw" style="width:14px;height:14px;border-radius:4px;flex:0 0 auto;background:' + slotColor(m.slotNumber) + ';"></div>' : '';
         html += '<div class="fam-row' + (m.checkedIn ? ' done-row' : '') + '">' +
           '<input type="checkbox" data-coupon="' + m.couponId + '" ' + (disabled ? 'disabled' : (m.slotNumber ? 'checked' : '')) + '>' +
+          swatch +
           '<div class="fam-name">' + escapeHtmlS(m.name) + ' (' + (m.type==='Adult'?'A':'K') + ') — ' + m.couponId + '<br><span class="fam-note">' + note + '</span></div>' +
           '</div>';
       });
@@ -379,4 +427,5 @@
     if(scanner) scanner.resume();
   }
 </script>
-</bod
+</body>
+</html>
