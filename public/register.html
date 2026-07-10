@@ -81,7 +81,7 @@
     <input type="text" id="contact" placeholder="e.g. Arjun Cheruvathari">
 
     <label class="required">Your WhatsApp Number</label>
-    <input type="tel" id="phone" placeholder="10-digit mobile number">
+    <input type="tel" id="phone" placeholder="10-digit mobile number" maxlength="10" oninput="this.value=this.value.replace(/\D/g,'').slice(0,10)">
 
     <label style="margin-top:16px;">Adults (₹<span class="adultPriceTxt">450</span> each)</label>
     <div id="adultsList"></div>
@@ -118,7 +118,7 @@
     <button class="link-btn" onclick="toggleStatus()">Already registered? Check your status</button>
     <div id="statusArea" class="hidden" style="margin-top:12px;">
       <label>Your WhatsApp Number</label>
-      <input type="tel" id="statusPhone" placeholder="10-digit mobile number">
+      <input type="tel" id="statusPhone" placeholder="10-digit mobile number" maxlength="10" oninput="this.value=this.value.replace(/\D/g,'').slice(0,10)">
       <button class="btn-secondary" style="width:100%;margin-top:8px;" onclick="checkStatus()">Check Status</button>
       <div id="statusResult" style="margin-top:10px;"></div>
     </div>
@@ -245,7 +245,7 @@
     if(!payload.flat){ missing.push('Flat Number'); document.getElementById('flat').classList.add('field-err'); }
     if(!payload.phase){ missing.push('Phase'); document.getElementById('phasePH1').classList.add('field-err'); document.getElementById('phasePH2').classList.add('field-err'); }
     if(!payload.contact){ missing.push('Your Name'); document.getElementById('contact').classList.add('field-err'); }
-    if(!payload.phone || payload.phone.replace(/\D/g,'').length < 10){ missing.push('WhatsApp Number'); document.getElementById('phone').classList.add('field-err'); }
+    if(!payload.phone || payload.phone.replace(/\D/g,'').length !== 10){ missing.push('WhatsApp Number (exactly 10 digits)'); document.getElementById('phone').classList.add('field-err'); }
     if(payload.adults.length === 0 && payload.kids.length === 0){ missing.push('At least one adult or kid'); }
     return missing;
   }
@@ -344,21 +344,30 @@
       el.innerHTML = '<div class="center">No registration found for this number.</div>';
       return;
     }
-    var pillClass = res.status === 'Confirmed' ? 'confirmed' : 'pending';
-    var html = '<div><b>' + res.regId + '</b> &middot; <span class="status-pill ' + pillClass + '">' + res.status + '</span></div>' +
-      '<div style="margin-top:6px;font-size:13px;">₹' + res.total + ' &middot; ' + res.adultCount + ' adult(s), ' + res.kidCount + ' kid(s)</div>';
-    if(res.status === 'Confirmed' && res.coupons){
-      html += '<div style="margin-top:10px;font-weight:700;font-size:13px;">Your coupons:</div>';
-      res.coupons.forEach(function(c){
-        html += '<a class="person-link" href="' + c.url + '">' + c.name + ' (' + c.type + ')' +
-          (c.slotNumber ? ' — Slot ' + c.slotNumber + ' (' + c.slotTime + ')' : ' — pick your slot') + '</a>';
-      });
-    } else if(res.status === 'Pending') {
-      html += '<div style="margin-top:8px;font-size:12px;color:#888;">Waiting for the committee to verify your payment.</div>';
+    var html = '';
+    res.registrations.forEach(function(reg, idx){
+      var pillClass = reg.status === 'Confirmed' ? 'confirmed' : 'pending';
+      if(idx > 0) html += '<hr style="border:none;border-top:1px solid #eee;margin:14px 0;">';
+      html += '<div><b>' + reg.regId + '</b> &middot; <span class="status-pill ' + pillClass + '">' + reg.status + '</span></div>' +
+        '<div style="margin-top:6px;font-size:13px;">' + escapeHtml(reg.flat || '') + (reg.phase ? ' (' + reg.phase + ')' : '') +
+        ' &middot; ₹' + reg.total + ' &middot; ' + reg.adultCount + ' adult(s), ' + reg.kidCount + ' kid(s)</div>';
+      if(reg.status === 'Confirmed' && reg.coupons){
+        html += '<div style="margin-top:10px;font-weight:700;font-size:13px;">Coupons:</div>';
+        reg.coupons.forEach(function(c){
+          html += '<a class="person-link" href="' + c.url + '">' + c.name + ' (' + c.type + ')' +
+            (c.slotNumber ? ' - Slot ' + c.slotNumber + ' (' + c.slotTime + ')' : ' - pick your slot') + '</a>';
+        });
+      } else if(reg.status === 'Pending') {
+        html += '<div style="margin-top:8px;font-size:12px;color:#888;">Waiting for the committee to verify your payment.</div>';
+      }
+    });
+    if(res.registrations.length > 1){
+      html = '<div style="margin-bottom:10px;font-size:12px;color:#888;">This number has ' + res.registrations.length + ' registrations:</div>' + html;
     }
     el.innerHTML = html;
   }
 
   init();
 </script>
-</bod
+</body>
+</html>
