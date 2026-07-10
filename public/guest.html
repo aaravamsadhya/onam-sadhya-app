@@ -42,7 +42,7 @@
   .msg.ok{background:#E6F4EA;color:#0B6E4F;display:block;}
   .center{text-align:center;color:#888;font-size:14px;padding:20px;}
   button.linklike{background:none;border:none;color:var(--leaf-dark);text-decoration:underline;font-size:13px;cursor:pointer;padding:0;margin-top:10px;}
-  .hidden{display:none;}
+  .hidden{display:none !important;}
 </style>
 </head>
 <body>
@@ -56,6 +56,10 @@
 
   <div id="invalidCard" class="card center hidden">
     This link doesn't match a valid coupon. Please use the link from the QR code on your coupon, or contact the Sadhya committee.
+  </div>
+
+  <div id="cancelledCard" class="card center hidden">
+    This coupon has been cancelled by the Sadhya committee. If you think this is a mistake, please contact the committee.
   </div>
 
   <div id="content" class="hidden">
@@ -111,6 +115,10 @@
       el('loading').classList.add('hidden');
       if(!info.found){
         el('invalidCard').classList.remove('hidden');
+        return;
+      }
+      if(info.active === false){
+        el('cancelledCard').classList.remove('hidden');
         return;
       }
       myInfo = info;
@@ -194,5 +202,4 @@
 
   init();
 </script>
-</body>
-</html>
+</bod
