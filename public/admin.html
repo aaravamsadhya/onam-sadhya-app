@@ -59,6 +59,24 @@
   .chip.noslot{background:#FFF3CD;color:#8a6d00;}
   .empty-note{color:#999;font-size:13px;padding:8px 0;}
   #regFilter{margin-bottom:4px;}
+
+  .chip.disabled{background:#f0f0f0;color:#aaa;text-decoration:line-through;}
+  .pill.disabled{background:#f0f0f0;color:#888;}
+  .btn-manage{background:#e9e2ff;color:#4a3aa8;}
+  .btn-danger{background:var(--maroon);color:#fff;}
+  .name-row{display:flex;gap:6px;margin-bottom:6px;align-items:center;}
+  .name-row input{flex:1;}
+  .name-row .btn-remove{background:#FDECEA;color:#8E1B1B;padding:8px 10px;flex:0 0 auto;}
+  .btn-add-name{background:#eee;color:#333;width:100%;margin-top:2px;margin-bottom:12px;}
+  .edit-section-label{font-size:12px;font-weight:700;color:#555;margin-top:14px;}
+  .danger-zone{border:1.5px dashed var(--maroon);border-radius:10px;padding:12px;margin-top:16px;}
+  .danger-zone p{font-size:12px;color:#8E1B1B;margin:0 0 8px;}
+  .pill.rejected{background:#FDECEA;color:#8E1B1B;}
+  .btn-reject{background:#FDECEA;color:#8E1B1B;}
+  .btn-restore{background:#E6F4EA;color:#0B6E4F;}
+  .phase-tag{display:inline-block;background:#eee;color:#555;font-size:10px;font-weight:700;border-radius:6px;padding:2px 6px;margin-left:6px;}
+  .who-badge{background:rgba(255,255,255,.15);border-radius:20px;padding:4px 12px;font-size:12px;display:inline-block;margin-top:6px;}
+  select.mgr-select{width:100%;padding:10px 12px;border:1.5px solid #ddd;border-radius:8px;font-size:15px;font-family:inherit;background:#fff;}
 </style>
 </head>
 <body>
@@ -71,10 +89,8 @@
 
   <div class="card" id="pinCard">
     <h2>Committee Login</h2>
-    <label>Admin PIN</label>
-    <input type="password" id="pinInput" placeholder="Enter admin PIN">
-    <label>Your Name (for records)</label>
-    <input type="text" id="adminName" placeholder="e.g. Rajiv">
+    <label>Your PIN</label>
+    <input type="password" id="pinInput" placeholder="Enter your PIN">
     <button class="btn-primary" onclick="login()">Unlock</button>
     <div class="msg err" id="pinMsg"></div>
   </div>
@@ -83,7 +99,8 @@
 
     <div class="card">
       <h2>Dashboard</h2>
-      <div class="stat-row" id="statRow"></div>
+      <div class="who-badge" id="whoBadge" style="background:var(--cream);color:var(--leaf-dark);"></div>
+      <div class="stat-row" id="statRow" style="margin-top:10px;"></div>
       <div id="dashSlots"></div>
       <div style="display:flex;gap:8px;margin-top:8px;">
         <button class="btn-secondary" onclick="refreshAll()" style="flex:1;">Refresh</button>
@@ -111,10 +128,57 @@
     </div>
 
     <div class="card">
+      <h2>Rejected Registrations <span class="pill rejected" id="rejectedCountBadge">0</span></h2>
+      <div id="rejectedList"></div>
+    </div>
+
+    <div class="card">
       <h2>Search / Manage Individual Coupons</h2>
       <input type="text" id="searchQ" placeholder="Search by name, phone, or coupon ID">
       <button class="btn-secondary" onclick="doSearch()" style="width:100%;margin-top:8px;">Search</button>
       <div id="searchResults" style="margin-top:10px;"></div>
+    </div>
+
+    <div class="card" id="manageCard">
+      <h2>Edit / Manage Registrations</h2>
+      <label>Load a registration by Reg ID, flat, name or phone</label>
+      <div style="display:flex;gap:8px;">
+        <input type="text" id="manageLookup" placeholder="e.g. REG-002 or B-202" style="flex:1;">
+        <button class="btn-manage" style="flex:0 0 auto;" onclick="loadManageForm()">Load</button>
+      </div>
+      <div class="msg err" id="manageMsg"></div>
+
+      <div id="manageForm" class="hidden">
+        <div class="edit-section-label">Reg ID: <span id="mRegId"></span> &middot; Status: <span id="mStatus"></span></div>
+
+        <label>Flat Number</label>
+        <input type="text" id="mFlat">
+        <label>Phase</label>
+        <select class="mgr-select" id="mPhase">
+          <option value="PH1">PH1</option>
+          <option value="PH2">PH2</option>
+        </select>
+        <label>Primary Contact Name</label>
+        <input type="text" id="mContact">
+        <label>WhatsApp / Phone Number</label>
+        <input type="text" id="mPhone">
+
+        <div class="edit-section-label">Adults</div>
+        <div id="mAdults"></div>
+        <button class="btn-add-name" onclick="addNameField('mAdults','Adult name')">+ Add Adult</button>
+
+        <div class="edit-section-label">Kids</div>
+        <div id="mKids"></div>
+        <button class="btn-add-name" onclick="addNameField('mKids','Kid name')">+ Add Kid</button>
+
+        <button class="btn-primary" onclick="saveManageForm()">💾 Save Changes</button>
+        <div class="msg" id="manageSaveMsg"></div>
+
+        <div class="danger-zone">
+          <p>Deleting a registration permanently removes it and all of its coupons. This cannot be undone — use this only for test entries or genuine cancellations.</p>
+          <button class="btn-danger" style="width:100%;" onclick="deleteManagedReg()">🗑 Delete This Registration</button>
+        </div>
+      </div>
     </div>
 
   </div>
@@ -134,13 +198,13 @@
 
   async function login(){
     PIN = document.getElementById('pinInput').value;
-    ADMIN_NAME = document.getElementById('adminName').value;
     try{
       var dash = await api('GET', '/api/admin/dashboard?pin=' + encodeURIComponent(PIN));
       if(!dash.success){
         showMsg('pinMsg', dash.message || 'Invalid PIN', 'err');
         return;
       }
+      ADMIN_NAME = dash.adminName || 'Committee';
       document.getElementById('pinCard').classList.add('hidden');
       document.getElementById('mainArea').classList.remove('hidden');
       renderDashboard(dash);
@@ -152,6 +216,7 @@
 
   async function refreshAll(){
     var dash = await api('GET', '/api/admin/dashboard?pin=' + encodeURIComponent(PIN));
+    ADMIN_NAME = dash.adminName || ADMIN_NAME;
     renderDashboard(dash);
     loadRegistrations();
   }
@@ -162,9 +227,11 @@
 
   function renderDashboard(dash){
     if(!dash.success) return;
+    document.getElementById('whoBadge').innerText = 'Logged in as: ' + (dash.adminName || ADMIN_NAME || 'Committee');
     document.getElementById('statRow').innerHTML =
       stat(dash.pendingRegs, 'Pending Payments') +
       stat(dash.confirmedRegs, 'Confirmed Families') +
+      stat(dash.rejectedRegs || 0, 'Rejected') +
       stat(dash.issued, 'Coupons Issued') +
       stat(dash.booked, 'Slots Booked') +
       stat(dash.checkedIn, 'Checked In');
@@ -215,6 +282,7 @@
     var filtered = ALL_REGS.filter(function(r){ return matchesFilter(r, q); });
     var pending = filtered.filter(function(r){ return r.status === 'Pending'; });
     var confirmed = filtered.filter(function(r){ return r.status === 'Confirmed'; });
+    var rejected = filtered.filter(function(r){ return r.status === 'Rejected'; });
 
     var allConfirmed = ALL_REGS.filter(function(r){ return r.status === 'Confirmed'; });
     var totalAdults = allConfirmed.reduce(function(s,r){ return s + (r.adults||[]).length; }, 0);
@@ -229,6 +297,7 @@
 
     document.getElementById('pendingCountBadge').innerText = pending.length;
     document.getElementById('confirmedCountBadge').innerText = confirmed.length;
+    document.getElementById('rejectedCountBadge').innerText = rejected.length;
 
     document.getElementById('pendingList').innerHTML = pending.length
       ? pending.map(renderPendingRow).join('')
@@ -237,6 +306,14 @@
     document.getElementById('confirmedList').innerHTML = confirmed.length
       ? confirmed.map(renderConfirmedRow).join('')
       : '<div class="empty-note">' + (q ? 'No matches.' : 'No confirmed registrations yet.') + '</div>';
+
+    document.getElementById('rejectedList').innerHTML = rejected.length
+      ? rejected.map(renderRejectedRow).join('')
+      : '<div class="empty-note">' + (q ? 'No matches.' : 'No rejected registrations.') + '</div>';
+  }
+
+  function phaseTag(r){
+    return r.phase ? '<span class="phase-tag">' + escapeHtml(r.phase) + '</span>' : '';
   }
 
   function phoneLink(phone){
@@ -247,13 +324,15 @@
   function renderPendingRow(r, i){
     return '<div class="reg-card">' +
       '<div class="reg-head"><div><span class="sno">' + (i+1) + '</span>' +
-      '<span class="reg-id">' + r.regId + '</span> — ' + escapeHtml(r.flat) + ' — ' + escapeHtml(r.contact) + '</div>' +
+      '<span class="reg-id">' + r.regId + '</span> — ' + escapeHtml(r.flat) + phaseTag(r) + ' — ' + escapeHtml(r.contact) + '</div>' +
       '<span class="pill pending">Pending</span></div>' +
       '<div class="reg-contact" style="margin-top:4px;">' + phoneLink(r.phone) + ' &middot; ₹' + r.total +
       (r.txnRef ? (' &middot; Ref: ' + escapeHtml(r.txnRef)) : '') + '</div>' +
       '<div class="reg-people">Adults: ' + ((r.adults||[]).join(', ') || '—') + '<br>Kids: ' + ((r.kids||[]).join(', ') || '—') + '</div>' +
       '<div class="reg-actions">' +
       '<button class="btn-confirm" onclick="confirmPayment(\'' + r.regId + '\')">✓ Confirm Payment &amp; Generate Coupons</button>' +
+      '<button class="btn-manage" onclick="manageReg(\'' + r.regId + '\')">✎ Manage</button>' +
+      '<button class="btn-reject" onclick="rejectReg(\'' + r.regId + '\')">✕ Reject</button>' +
       '</div></div>';
   }
 
@@ -261,7 +340,8 @@
     var cls = 'chip';
     var label = c.couponId + ' (' + (c.type==='Adult'?'A':'K') + ')';
     var title = c.name;
-    if(c.checkedIn){ cls += ' checkedin'; label += ' ✓'; title += ' — Checked in'; }
+    if(c.active === false){ cls += ' disabled'; label += ' — Disabled'; title += ' — Cancelled by committee'; }
+    else if(c.checkedIn){ cls += ' checkedin'; label += ' ✓'; title += ' — Checked in'; }
     else if(c.slotNumber){ title += ' — Slot ' + c.slotNumber + ' (' + c.slotTime + ')'; }
     else { cls += ' noslot'; title += ' — No slot booked yet'; }
     return '<span class="' + cls + '" title="' + escapeHtml(title) + '">' + escapeHtml(label) + '</span>';
@@ -271,7 +351,7 @@
     var chips = (r.coupons||[]).map(couponChip).join('');
     return '<div class="reg-card">' +
       '<div class="reg-head"><div><span class="sno">' + (i+1) + '</span>' +
-      '<span class="reg-id">' + r.regId + '</span> — ' + escapeHtml(r.flat) + ' — ' + escapeHtml(r.contact) + '</div>' +
+      '<span class="reg-id">' + r.regId + '</span> — ' + escapeHtml(r.flat) + phaseTag(r) + ' — ' + escapeHtml(r.contact) + '</div>' +
       '<span class="pill confirmed">Confirmed</span></div>' +
       '<div class="reg-contact" style="margin-top:4px;">' + phoneLink(r.phone) + ' &middot; ₹' + r.total +
       (r.confirmedBy ? (' &middot; Confirmed by ' + escapeHtml(r.confirmedBy)) : '') + '</div>' +
@@ -280,16 +360,50 @@
       '<div class="reg-actions">' +
       '<button class="btn-wa" onclick="shareCoupons(\'' + r.regId + '\')">📱 Share Coupons on WhatsApp</button>' +
       '<button class="btn-secondary" onclick="shareReminder(\'' + r.regId + '\')">⏰ Send Slot Reminder</button>' +
+      '<button class="btn-manage" onclick="manageReg(\'' + r.regId + '\')">✎ Manage</button>' +
+      '</div></div>';
+  }
+
+  function renderRejectedRow(r, i){
+    return '<div class="reg-card">' +
+      '<div class="reg-head"><div><span class="sno">' + (i+1) + '</span>' +
+      '<span class="reg-id">' + r.regId + '</span> — ' + escapeHtml(r.flat) + phaseTag(r) + ' — ' + escapeHtml(r.contact) + '</div>' +
+      '<span class="pill rejected">Rejected</span></div>' +
+      '<div class="reg-contact" style="margin-top:4px;">' + phoneLink(r.phone) + ' &middot; ₹' + r.total + '</div>' +
+      '<div class="reg-people">Adults: ' + ((r.adults||[]).join(', ') || '—') + '<br>Kids: ' + ((r.kids||[]).join(', ') || '—') + '</div>' +
+      '<div class="reg-people" style="margin-top:6px;">Reason: ' + escapeHtml(r.rejectedReason || '—') +
+      (r.rejectedBy ? (' &middot; by ' + escapeHtml(r.rejectedBy)) : '') + '</div>' +
+      '<div class="reg-actions">' +
+      '<button class="btn-restore" onclick="restoreReg(\'' + r.regId + '\')">↩ Restore to Pending</button>' +
       '</div></div>';
   }
 
   async function confirmPayment(regId){
     if(!confirm('Confirm payment received for ' + regId + '? This will generate individual coupons.')) return;
     try{
-      var res = await api('POST', '/api/admin/confirm', { regId: regId, pin: PIN, confirmedBy: ADMIN_NAME });
+      var res = await api('POST', '/api/admin/confirm', { regId: regId, pin: PIN });
       if(!res.success){ alert(res.message); return; }
       await refreshAll();
       shareCoupons(regId);
+    }catch(err){ alert('Error: ' + err.message); }
+  }
+
+  async function rejectReg(regId){
+    var reason = prompt('Reason for rejecting ' + regId + '? (e.g. "No payment received" or "Test entry")', 'No payment received');
+    if(reason === null) return;
+    try{
+      var res = await api('POST', '/api/admin/reject-registration', { pin: PIN, regId: regId, reason: reason });
+      if(!res.success){ alert(res.message); return; }
+      await refreshAll();
+    }catch(err){ alert('Error: ' + err.message); }
+  }
+
+  async function restoreReg(regId){
+    if(!confirm('Restore ' + regId + ' back to Pending?')) return;
+    try{
+      var res = await api('POST', '/api/admin/restore-registration', { pin: PIN, regId: regId });
+      if(!res.success){ alert(res.message); return; }
+      await refreshAll();
     }catch(err){ alert('Error: ' + err.message); }
   }
 
@@ -315,12 +429,15 @@
     if(!res.success){ document.getElementById('searchResults').innerHTML = res.message; return; }
     var html = '';
     res.results.forEach(function(r){
+      var statusPill = r.active === false
+        ? '<span class="pill disabled">Disabled</span>'
+        : '<span class="pill ' + (r.checkedIn?'yes':'no') + '">' + (r.checkedIn?'Checked in':'Not yet') + '</span>';
       html += '<div class="result-row"><div>' +
         '<b>' + r.couponId + '</b> — ' + escapeHtml(r.name) + ' (' + r.type + ')<br>' +
         '<span style="color:#888;">' + (r.phone||'') + (r.slotNumber ? (' &middot; Slot '+r.slotNumber+' ('+r.slotTime+')') : ' &middot; no slot yet') + '</span>' +
         '</div><div>' +
-        '<span class="pill ' + (r.checkedIn?'yes':'no') + '">' + (r.checkedIn?'Checked in':'Not yet') + '</span> ' +
-        (r.checkedIn ? '<button class="btn-secondary" onclick="doReset(\''+r.couponId+'\')">Undo</button>' : '') +
+        statusPill + ' ' +
+        (r.active !== false && r.checkedIn ? '<button class="btn-secondary" onclick="doReset(\''+r.couponId+'\')">Undo</button>' : '') +
         '</div></div>';
     });
     document.getElementById('searchResults').innerHTML = html || 'No matches.';
@@ -329,6 +446,111 @@
   async function doReset(id){
     var res = await api('POST', '/api/admin/reset-checkin', { couponId: id, pin: PIN });
     if(res.success) doSearch(); else alert(res.message);
+  }
+
+  // ============== EDIT / MANAGE REGISTRATIONS ==============
+  var MANAGED_REG = null;
+
+  function manageReg(regId){
+    document.getElementById('manageLookup').value = regId;
+    loadManageForm();
+    document.getElementById('manageCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function loadManageForm(){
+    var q = document.getElementById('manageLookup').value.trim();
+    var msgEl = document.getElementById('manageMsg');
+    msgEl.style.display = 'none';
+    if(!q){ msgEl.style.display='block'; msgEl.innerText = 'Enter a Reg ID, flat, name or phone to search.'; return; }
+    var qLower = q.toLowerCase();
+    var match = ALL_REGS.find(function(r){ return (r.regId||'').toLowerCase() === qLower; }) ||
+      ALL_REGS.find(function(r){ return matchesFilter(r, q); });
+    if(!match){
+      msgEl.style.display='block';
+      msgEl.innerText = 'No registration found matching "' + q + '". Try the exact Reg ID (e.g. REG-002).';
+      document.getElementById('manageForm').classList.add('hidden');
+      return;
+    }
+    MANAGED_REG = match;
+    document.getElementById('mRegId').innerText = match.regId;
+    document.getElementById('mStatus').innerText = match.status;
+    document.getElementById('mFlat').value = match.flat || '';
+    document.getElementById('mPhase').value = match.phase || 'PH1';
+    document.getElementById('mContact').value = match.contact || '';
+    document.getElementById('mPhone').value = match.phone || '';
+    renderNameFields('mAdults', match.adults || [], 'Adult name');
+    renderNameFields('mKids', match.kids || [], 'Kid name');
+    document.getElementById('manageForm').classList.remove('hidden');
+    document.getElementById('manageSaveMsg').style.display = 'none';
+  }
+
+  function renderNameFields(containerId, names, placeholder){
+    var container = document.getElementById(containerId);
+    container.innerHTML = '';
+    if(!names.length) names = [''];
+    names.forEach(function(n){ addNameFieldRow(containerId, placeholder, n); });
+  }
+
+  function addNameField(containerId, placeholder){
+    addNameFieldRow(containerId, placeholder, '');
+  }
+
+  function addNameFieldRow(containerId, placeholder, value){
+    var container = document.getElementById(containerId);
+    var row = document.createElement('div');
+    row.className = 'name-row';
+    row.innerHTML = '<input type="text" placeholder="' + escapeHtml(placeholder) + '" value="' + escapeHtml(value) + '">' +
+      '<button type="button" class="btn-remove" onclick="this.parentElement.remove()">✕</button>';
+    container.appendChild(row);
+  }
+
+  function collectNames(containerId){
+    var inputs = document.querySelectorAll('#' + containerId + ' input');
+    var names = [];
+    inputs.forEach(function(inp){ var v = inp.value.trim(); if(v) names.push(v); });
+    return names;
+  }
+
+  async function saveManageForm(){
+    if(!MANAGED_REG) return;
+    var msgEl = document.getElementById('manageSaveMsg');
+    var payload = {
+      pin: PIN,
+      regId: MANAGED_REG.regId,
+      flat: document.getElementById('mFlat').value.trim(),
+      phase: document.getElementById('mPhase').value,
+      contact: document.getElementById('mContact').value.trim(),
+      phone: document.getElementById('mPhone').value.trim(),
+      adults: collectNames('mAdults'),
+      kids: collectNames('mKids')
+    };
+    try{
+      var res = await api('POST', '/api/admin/update-registration', payload);
+      if(!res.success){
+        msgEl.className = 'msg err'; msgEl.style.display='block'; msgEl.innerText = res.message;
+        return;
+      }
+      var note = 'Saved.';
+      if(res.disabledCoupons && res.disabledCoupons.length) note += ' Disabled coupons: ' + res.disabledCoupons.join(', ') + '.';
+      if(res.newCoupons && res.newCoupons.length) note += ' New coupons issued: ' + res.newCoupons.map(function(c){return c.couponId;}).join(', ') + '.';
+      msgEl.className = 'msg ok'; msgEl.style.display='block'; msgEl.innerText = note;
+      await refreshAll();
+    }catch(err){
+      msgEl.className = 'msg err'; msgEl.style.display='block'; msgEl.innerText = 'Error: ' + err.message;
+    }
+  }
+
+  async function deleteManagedReg(){
+    if(!MANAGED_REG) return;
+    if(!confirm('Permanently delete ' + MANAGED_REG.regId + ' (' + MANAGED_REG.contact + ') and all of its coupons? This cannot be undone.')) return;
+    try{
+      var res = await api('POST', '/api/admin/delete-registration', { pin: PIN, regId: MANAGED_REG.regId });
+      if(!res.success){ alert(res.message); return; }
+      document.getElementById('manageForm').classList.add('hidden');
+      document.getElementById('manageLookup').value = '';
+      MANAGED_REG = null;
+      await refreshAll();
+    }catch(err){ alert('Error: ' + err.message); }
   }
 
   function escapeHtml(s){
