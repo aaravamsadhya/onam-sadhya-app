@@ -44,6 +44,17 @@
   .status-pill.confirmed{background:#E6F4EA;color:#0B6E4F;}
   .person-link{display:block;padding:6px 0;border-bottom:1px solid #f2f2f2;font-size:13px;color:var(--leaf-dark);text-decoration:none;}
   .center{text-align:center;color:#888;font-size:13px;}
+  .required:after{content:' *';color:var(--maroon);}
+  .phase-options{display:flex;gap:10px;margin-top:4px;}
+  .phase-opt{flex:1;border:1.5px solid #ddd;border-radius:8px;padding:10px;text-align:center;cursor:pointer;font-weight:700;color:#555;}
+  .phase-opt.selected{border-color:var(--leaf);background:#E6F4EA;color:var(--leaf-dark);}
+  .field-err{border-color:var(--maroon) !important;}
+  .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;padding:16px;z-index:50;}
+  .modal-box{background:#fff;border-radius:14px;padding:20px;max-width:440px;width:100%;max-height:80vh;overflow:auto;}
+  .modal-box h3{margin:0 0 10px;color:var(--maroon);font-size:17px;}
+  .existing-reg{border:1px solid #eee;border-radius:8px;padding:10px;margin-bottom:8px;font-size:13px;}
+  .modal-actions{display:flex;gap:8px;margin-top:14px;}
+  .modal-actions button{flex:1;}
 </style>
 </head>
 <body>
@@ -57,13 +68,19 @@
   <div class="card" id="formCard">
     <h2>Register Your Family</h2>
 
-    <label>Flat Number</label>
+    <label class="required">Flat Number</label>
     <input type="text" id="flat" placeholder="e.g. A-1203">
 
-    <label>Your Name (Primary Contact)</label>
+    <label class="required">Phase</label>
+    <div class="phase-options">
+      <div class="phase-opt" id="phasePH1" onclick="selectPhase('PH1')">PH1</div>
+      <div class="phase-opt" id="phasePH2" onclick="selectPhase('PH2')">PH2</div>
+    </div>
+
+    <label class="required">Your Name (Primary Contact)</label>
     <input type="text" id="contact" placeholder="e.g. Arjun Cheruvathari">
 
-    <label>Your WhatsApp Number</label>
+    <label class="required">Your WhatsApp Number</label>
     <input type="tel" id="phone" placeholder="10-digit mobile number">
 
     <label style="margin-top:16px;">Adults (₹<span class="adultPriceTxt">450</span> each)</label>
@@ -109,10 +126,28 @@
 
 </div>
 
+<div class="modal-backdrop hidden" id="dupModal">
+  <div class="modal-box">
+    <h3>Already registered under this number?</h3>
+    <div id="dupList"></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="cancelDuplicate()">Cancel</button>
+      <button class="btn-primary" style="margin-top:0;" onclick="proceedAnyway()">Yes, book anyway</button>
+    </div>
+  </div>
+</div>
+
 <script>
   var adults = [''];
   var kids = [];
+  var phase = '';
   var cfg = { adultPrice: 450, kidPrice: 250, upiId: '', upiName: 'Aaravam Sadhya Committee' };
+
+  function selectPhase(p){
+    phase = p;
+    document.getElementById('phasePH1').classList.toggle('selected', p === 'PH1');
+    document.getElementById('phasePH2').classList.toggle('selected', p === 'PH2');
+  }
 
   async function api(method, url, body){
     var opts = { method: method, headers: {} };
@@ -185,27 +220,106 @@
 
   document.getElementById('paidCheck').addEventListener('change', updateTotal);
 
-  async function submitForm(){
-    var payload = {
-      flat: document.getElementById('flat').value,
-      contact: document.getElementById('contact').value,
+  function buildPayload(confirmDuplicate){
+    return {
+      flat: document.getElementById('flat').value.trim(),
+      phase: phase,
+      contact: document.getElementById('contact').value.trim(),
       phone: document.getElementById('phone').value,
       adults: adults.filter(function(n){ return n.trim(); }),
       kids: kids.filter(function(n){ return n.trim(); }),
-      txnRef: document.getElementById('txnRef').value
+      txnRef: document.getElementById('txnRef').value,
+      confirmDuplicate: !!confirmDuplicate
     };
+  }
+
+  function clearFieldErrors(){
+    ['flat','contact','phone'].forEach(function(id){ document.getElementById(id).classList.remove('field-err'); });
+    document.getElementById('phasePH1').classList.remove('field-err');
+    document.getElementById('phasePH2').classList.remove('field-err');
+  }
+
+  function validateRequired(payload){
+    clearFieldErrors();
+    var missing = [];
+    if(!payload.flat){ missing.push('Flat Number'); document.getElementById('flat').classList.add('field-err'); }
+    if(!payload.phase){ missing.push('Phase'); document.getElementById('phasePH1').classList.add('field-err'); document.getElementById('phasePH2').classList.add('field-err'); }
+    if(!payload.contact){ missing.push('Your Name'); document.getElementById('contact').classList.add('field-err'); }
+    if(!payload.phone || payload.phone.replace(/\D/g,'').length < 10){ missing.push('WhatsApp Number'); document.getElementById('phone').classList.add('field-err'); }
+    if(payload.adults.length === 0 && payload.kids.length === 0){ missing.push('At least one adult or kid'); }
+    return missing;
+  }
+
+  var pendingPayload = null;
+
+  async function submitForm(){
+    var payload = buildPayload(false);
+    var missing = validateRequired(payload);
+    if(missing.length){
+      showMsg('Please fill in: ' + missing.join(', '), 'err');
+      return;
+    }
     document.getElementById('submitBtn').disabled = true;
     try{
       var res = await api('POST', '/api/register', payload);
+      if(res.duplicate){
+        pendingPayload = payload;
+        showDuplicateModal(res.existing);
+        document.getElementById('submitBtn').disabled = false;
+        return;
+      }
       if(!res.success){
         showMsg(res.message, 'err');
         document.getElementById('submitBtn').disabled = false;
         return;
       }
-      document.getElementById('formCard').innerHTML = '<h2>Registered!</h2>' +
-        '<p>Thanks, ' + escapeHtml(payload.contact) + '! Your registration <b>' + res.regId + '</b> for ₹' + res.total + ' has been received.</p>' +
-        '<p>The Sadhya committee will verify your payment and send your individual coupons to this WhatsApp number shortly.</p>';
-      document.getElementById('payCard').classList.add('hidden');
+      finishRegistration(payload, res);
+    }catch(err){
+      showMsg('Something went wrong: ' + err.message, 'err');
+      document.getElementById('submitBtn').disabled = false;
+    }
+  }
+
+  function finishRegistration(payload, res){
+    document.getElementById('formCard').innerHTML = '<h2>Registered!</h2>' +
+      '<p>Thanks, ' + escapeHtml(payload.contact) + '! Your registration <b>' + res.regId + '</b> for ₹' + res.total + ' has been received.</p>' +
+      '<p>The Sadhya committee will verify your payment and send your individual coupons to this WhatsApp number shortly.</p>';
+    document.getElementById('payCard').classList.add('hidden');
+  }
+
+  function showDuplicateModal(existing){
+    var html = '<p style="font-size:13px;color:#555;">This WhatsApp number already has ' + existing.length +
+      ' registration(s):</p>';
+    existing.forEach(function(e){
+      var people = e.adults.concat(e.kids).join(', ');
+      html += '<div class="existing-reg"><b>' + e.regId + '</b> &middot; ' + escapeHtml(e.flat) +
+        (e.phase ? ' (' + e.phase + ')' : '') + ' &middot; <span class="status-pill ' +
+        (e.status === 'Confirmed' ? 'confirmed' : 'pending') + '">' + e.status + '</span><br>' +
+        escapeHtml(people) + ' &middot; ₹' + e.total + '</div>';
+    });
+    html += '<p style="font-size:13px;color:#555;">Do you still want to proceed with a new booking for this family?</p>';
+    document.getElementById('dupList').innerHTML = html;
+    document.getElementById('dupModal').classList.remove('hidden');
+  }
+
+  function cancelDuplicate(){
+    document.getElementById('dupModal').classList.add('hidden');
+    pendingPayload = null;
+  }
+
+  async function proceedAnyway(){
+    if(!pendingPayload) return;
+    pendingPayload.confirmDuplicate = true;
+    document.getElementById('dupModal').classList.add('hidden');
+    document.getElementById('submitBtn').disabled = true;
+    try{
+      var res = await api('POST', '/api/register', pendingPayload);
+      if(!res.success){
+        showMsg(res.message, 'err');
+        document.getElementById('submitBtn').disabled = false;
+        return;
+      }
+      finishRegistration(pendingPayload, res);
     }catch(err){
       showMsg('Something went wrong: ' + err.message, 'err');
       document.getElementById('submitBtn').disabled = false;
@@ -249,4 +363,3 @@
 </script>
 </body>
 </html>
-  
