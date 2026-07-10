@@ -374,6 +374,7 @@
       '<div class="reg-people" style="margin-top:6px;">Reason: ' + escapeHtml(r.rejectedReason || '—') +
       (r.rejectedBy ? (' &middot; by ' + escapeHtml(r.rejectedBy)) : '') + '</div>' +
       '<div class="reg-actions">' +
+      '<button class="btn-wa" onclick="shareRejection(\'' + r.regId + '\')">📱 Notify via WhatsApp</button>' +
       '<button class="btn-restore" onclick="restoreReg(\'' + r.regId + '\')">↩ Restore to Pending</button>' +
       '</div></div>';
   }
@@ -395,6 +396,15 @@
       var res = await api('POST', '/api/admin/reject-registration', { pin: PIN, regId: regId, reason: reason });
       if(!res.success){ alert(res.message); return; }
       await refreshAll();
+      shareRejection(regId);
+    }catch(err){ alert('Error: ' + err.message); }
+  }
+
+  async function shareRejection(regId){
+    try{
+      var res = await api('GET', '/api/admin/share-rejection?regId=' + encodeURIComponent(regId) + '&pin=' + encodeURIComponent(PIN));
+      if(!res.success){ alert(res.message); return; }
+      window.open(res.waUrl, '_blank');
     }catch(err){ alert('Error: ' + err.message); }
   }
 
@@ -563,4 +573,5 @@
     el.innerText = text;
   }
 </script>
-</bod
+</body>
+</html>
