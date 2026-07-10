@@ -13,6 +13,10 @@ See **Onam_Sadhya_Web_App_Deployment_Guide.docx** for full step-by-step deployme
 - `public/scanner.html` — entrance scanner page (`?page=scan`)
 - `public/guest.html` — opened automatically from each person's coupon link
 
+## Excel report
+
+On the Admin page (`?page=admin`), click **Download Excel Report** to get a `.xlsx` file with every registration (name, flat, phone, adults/kids, amount, payment status) on one sheet and every individual coupon (slot, checked-in status) on a second sheet. Downloadable any time, as many times as you like.
+
 ## Environment variables
 
 See `.env.example` for the full list. Set these in Railway's Variables tab, not in a local `.env` file.
