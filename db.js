@@ -59,6 +59,26 @@ ALTER TABLE registrations ADD COLUMN IF NOT EXISTS rejected_by TEXT;
 ALTER TABLE registrations ADD COLUMN IF NOT EXISTS rejected_at TIMESTAMPTZ;
 
 ALTER TABLE coupons ADD COLUMN IF NOT EXISTS slot_overridden BOOLEAN NOT NULL DEFAULT false;
+
+CREATE SEQUENCE IF NOT EXISTS deleted_registrations_id_seq;
+CREATE TABLE IF NOT EXISTS deleted_registrations (
+  id INT PRIMARY KEY DEFAULT nextval('deleted_registrations_id_seq'),
+  reg_id TEXT NOT NULL,
+  flat TEXT,
+  phase TEXT,
+  contact TEXT,
+  phone TEXT,
+  adult_names JSONB NOT NULL DEFAULT '[]',
+  kid_names JSONB NOT NULL DEFAULT '[]',
+  coupon_ids JSONB NOT NULL DEFAULT '[]',
+  was_confirmed BOOLEAN NOT NULL DEFAULT false,
+  total INT NOT NULL DEFAULT 0,
+  refund_amount INT NOT NULL DEFAULT 0,
+  refunded BOOLEAN NOT NULL DEFAULT false,
+  refunded_at TIMESTAMPTZ,
+  deleted_by TEXT,
+  deleted_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 `;
 
 const DEFAULT_SLOTS = [
