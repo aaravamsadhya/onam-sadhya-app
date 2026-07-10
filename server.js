@@ -608,6 +608,36 @@ app.post('/api/admin/delete-registration', async (req, res) => {
   }
 });
 
+// ================= ADMIN: RESET ALL DATA (for going live after testing) =================
+// Wipes every registration, coupon, and deleted-registration record, and restarts the
+// REG-xxx / AAR-xxx numbering back to 1, so the app is a clean slate for the real event.
+// Requires both a valid admin PIN AND the literal confirm text "RESET" (typed by the admin
+// on the frontend via a prompt) as a second safeguard against an accidental click, since this
+// action is irreversible and destroys real data, not just a soft-delete.
+app.post('/api/admin/reset-all-data', async (req, res) => {
+  const body = req.body || {};
+  if (!checkPin(body.pin, 'admin')) return res.json({ success: false, message: 'Invalid admin PIN' });
+  if (body.confirm !== 'RESET') return res.json({ success: false, message: 'Confirmation text did not match. Nothing was deleted.' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('DELETE FROM coupons');
+    await client.query('DELETE FROM registrations');
+    await client.query('DELETE FROM deleted_registrations');
+    await client.query(`ALTER SEQUENCE registrations_id_seq RESTART WITH 1`);
+    await client.query(`ALTER SEQUENCE coupons_id_seq RESTART WITH 1`);
+    await client.query(`ALTER SEQUENCE deleted_registrations_id_seq RESTART WITH 1`);
+    await client.query('COMMIT');
+    res.json({ success: true });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Server error: ' + err.message });
+  } finally {
+    client.release();
+  }
+});
+
 // ================= ADMIN: DELETED REGISTRATIONS (audit trail + refunds) =================
 app.get('/api/admin/deleted-registrations', async (req, res) => {
   if (!checkPin(req.query.pin, 'admin')) return res.json({ success: false, message: 'Invalid admin PIN' });
