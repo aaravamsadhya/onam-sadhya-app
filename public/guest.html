@@ -13,6 +13,7 @@
   header{background:linear-gradient(90deg,var(--leaf-dark),var(--leaf));color:#fff;padding:20px 16px;text-align:center;}
   header h1{font-family:'Yatra One',cursive;font-size:28px;margin:0 0 4px;}
   header p{margin:0;font-size:13px;opacity:.9;}
+  .kasavu-strip{height:8px;background:repeating-linear-gradient(90deg,var(--gold) 0 10px,var(--gold-dark) 10px 14px,var(--maroon) 14px 20px,var(--gold-dark) 20px 24px);}
   .wrap{max-width:480px;margin:0 auto;padding:16px;}
   .card{background:#fff;border-radius:14px;padding:18px;margin-bottom:16px;box-shadow:0 2px 10px rgba(0,0,0,.08);border:1px solid #eee;}
   .coupon{border-radius:16px;overflow:hidden;border:3px solid var(--gold-dark);background:var(--cream);text-align:center;}
@@ -26,7 +27,10 @@
   .coupon-name{font-size:17px;font-weight:700;color:var(--leaf-dark);margin-top:2px;}
   .type-badge{display:inline-block;margin-top:4px;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;background:#fff;border:1px solid var(--gold-dark);color:var(--gold-dark);}
   .slot-badge{display:inline-block;margin-top:12px;padding:8px 16px;border-radius:24px;background:var(--leaf);color:#fff;font-weight:700;font-size:14px;}
-  .slot-badge.none{background:#eee;color:#888;}
+  .slot-badge.none{background:#eee !important;color:#888 !important;}
+  .slot-colors{display:flex;justify-content:center;gap:4px;margin-top:10px;}
+  .slot-colors .sw{width:14px;height:14px;border-radius:4px;}
+  .slot-color-note{font-size:11px;color:#8a7a4d;margin-top:4px;}
   .coupon-foot{background:var(--leaf-dark);color:#fff;font-size:11px;padding:8px;}
 
   h3{font-size:16px;color:var(--leaf-dark);margin:0 0 12px;border-bottom:2px solid var(--gold);padding-bottom:6px;}
@@ -48,8 +52,9 @@
 <body>
 <header>
   <h1>Aaravam</h1>
-  <p>Onam Sadhya Coupon &middot; DSR White Waters Clubhouse &middot; 5th September 2026</p>
+  <p>Onam Sadhya Coupon</p>
 </header>
+<div class="kasavu-strip"></div>
 
 <div class="wrap">
   <div id="loading" class="card center">Loading your coupon…</div>
@@ -76,6 +81,7 @@
           <div class="coupon-name" id="cName"></div>
           <div class="type-badge" id="cType"></div>
           <div id="slotBadge" class="slot-badge none">No slot selected yet</div>
+          <div class="slot-color-note" id="slotColorNote"></div>
         </div>
         <div class="coupon-foot">Show this QR at the clubhouse entrance</div>
         <div class="coupon-bottom"></div>
@@ -96,6 +102,19 @@
   var myInfo = null;
 
   function el(id){ return document.getElementById(id); }
+
+  // Each slot gets its own colour so a guest's coupon screen can be checked visually at the
+  // gate (against the colour legend on the scanner) without needing to scan the QR at all -
+  // useful when the queue is long or a phone's camera/QR won't scan.
+  var SLOT_COLORS = ['#F5B70A', '#0B6E4F', '#8E1B1B', '#1565C0', '#6A3AA8'];
+  function slotColor(n){ return SLOT_COLORS[(Number(n) - 1 + SLOT_COLORS.length) % SLOT_COLORS.length]; }
+  function slotTextColor(n){ return Number(n) === 1 ? '#3a2a00' : '#fff'; }
+  function applySlotColor(num){
+    var badge = el('slotBadge');
+    badge.style.background = slotColor(num);
+    badge.style.color = slotTextColor(num);
+    el('slotColorNote').innerText = 'Show this colour at the gate for a quick, no-scan check.';
+  }
 
   async function api(method, url, body){
     var opts = { method: method, headers: {} };
@@ -130,6 +149,7 @@
       if(info.slotNumber){
         el('slotBadge').classList.remove('none');
         el('slotBadge').innerText = 'Slot ' + info.slotNumber + ' — ' + info.slotTime;
+        applySlotColor(info.slotNumber);
         el('changeBtn').classList.remove('hidden');
         el('slotHeading').innerText = 'Your Slot';
         renderBookedState();
@@ -184,9 +204,10 @@
       myInfo.slotTime = res.slotTime;
       el('slotBadge').classList.remove('none');
       el('slotBadge').innerText = 'Slot ' + res.slotNumber + ' — ' + res.slotTime;
+      applySlotColor(res.slotNumber);
       el('changeBtn').classList.remove('hidden');
       el('slotHeading').innerText = 'Your Slot';
-      showMsg('Slot confirmed! See you on 5th Sept.', 'ok');
+      showMsg('Slot confirmed! See you at the Sadhya.', 'ok');
       renderBookedState();
     }catch(err){
       showMsg('Something went wrong: ' + err.message, 'err');
@@ -202,4 +223,5 @@
 
   init();
 </script>
-</bod
+</body>
+</html>
