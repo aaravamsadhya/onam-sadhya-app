@@ -12,6 +12,7 @@
   header{background:linear-gradient(90deg,var(--leaf-dark),var(--leaf));color:#fff;padding:18px 20px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.15);}
   header h1{font-family:'Yatra One',cursive;font-size:26px;margin:0 0 4px;}
   header p{margin:0;font-size:13px;opacity:.9;}
+  .kasavu-strip{height:8px;background:repeating-linear-gradient(90deg,var(--gold) 0 10px,var(--gold-dark) 10px 14px,var(--maroon) 14px 20px,var(--gold-dark) 20px 24px);}
   .wrap{max-width:680px;margin:0 auto;padding:16px;}
   .card{background:#fff;border-radius:14px;padding:18px;margin-bottom:16px;box-shadow:0 2px 10px rgba(0,0,0,.08);border:1px solid #eee;}
   .card h2{margin:0 0 12px;font-size:17px;color:var(--leaf-dark);border-bottom:2px solid var(--gold);padding-bottom:6px;}
@@ -82,8 +83,9 @@
 <body>
 <header>
   <h1>Aaravam</h1>
-  <p>Sadhya Committee Admin &middot; DSR White Waters &middot; 5th September 2026</p>
+  <p>Sadhya Committee Admin</p>
 </header>
+<div class="kasavu-strip"></div>
 
 <div class="wrap">
 
@@ -106,11 +108,21 @@
         <button class="btn-secondary" onclick="refreshAll()" style="flex:1;">Refresh</button>
         <button class="btn-confirm" onclick="downloadReport()" style="flex:1;">⬇ Download Excel Report</button>
       </div>
+      <button class="btn-danger" onclick="logout()" style="width:100%;margin-top:8px;">🚪 Log Out</button>
     </div>
 
     <div class="card">
       <h2>Confirmed Summary</h2>
       <div class="stat-row" id="confirmedStatRow"></div>
+    </div>
+
+    <div class="card">
+      <h2>💰 Revenue &amp; Cash Flow</h2>
+      <div class="stat-row" id="revenueStatRow"></div>
+      <div class="edit-section-label">Revenue by Phase</div>
+      <div id="revenueByPhase" style="margin-top:6px;"></div>
+      <div class="edit-section-label">Revenue by Day (payment confirmed)</div>
+      <div id="revenueByDay" style="margin-top:6px;"></div>
     </div>
 
     <div class="card">
@@ -130,6 +142,11 @@
     <div class="card">
       <h2>Rejected Registrations <span class="pill rejected" id="rejectedCountBadge">0</span></h2>
       <div id="rejectedList"></div>
+    </div>
+
+    <div class="card">
+      <h2>Deleted Registrations <span class="pill" id="deletedCountBadge" style="background:#f0f0f0;color:#555;">0</span></h2>
+      <div id="deletedList"></div>
     </div>
 
     <div class="card">
@@ -209,9 +226,21 @@
       document.getElementById('mainArea').classList.remove('hidden');
       renderDashboard(dash);
       loadRegistrations();
+      loadRevenue();
+      loadDeletedRegistrations();
     }catch(err){
       showMsg('pinMsg', 'Error: ' + err.message, 'err');
     }
+  }
+
+  function logout(){
+    PIN = '';
+    ADMIN_NAME = '';
+    ALL_REGS = [];
+    document.getElementById('mainArea').classList.add('hidden');
+    document.getElementById('pinCard').classList.remove('hidden');
+    document.getElementById('pinInput').value = '';
+    document.getElementById('pinMsg').style.display = 'none';
   }
 
   async function refreshAll(){
@@ -219,10 +248,88 @@
     ADMIN_NAME = dash.adminName || ADMIN_NAME;
     renderDashboard(dash);
     loadRegistrations();
+    loadRevenue();
+    loadDeletedRegistrations();
   }
 
   function downloadReport(){
     window.location.href = '/api/admin/export?pin=' + encodeURIComponent(PIN);
+  }
+
+  // ============== REVENUE / CASH FLOW ==============
+  async function loadRevenue(){
+    var res = await api('GET', '/api/admin/revenue?pin=' + encodeURIComponent(PIN));
+    if(!res.success) return;
+    document.getElementById('revenueStatRow').innerHTML =
+      stat('₹' + res.confirmedRevenue, 'Confirmed Revenue') +
+      stat('₹' + res.pendingRevenue, 'Pending Revenue') +
+      stat('₹' + res.refundsOwedTotal, 'Refunds Owed') +
+      stat('₹' + res.netRevenue, 'Net Revenue') +
+      stat('₹' + res.adultRevenue, 'Adult Ticket Revenue') +
+      stat('₹' + res.kidRevenue, 'Kid Ticket Revenue');
+
+    document.getElementById('revenueByPhase').innerHTML = res.byPhase.length ? revenueTable(res.byPhase, 'phase', 'Phase')
+      : '<div class="empty-note">No confirmed registrations yet.</div>';
+    document.getElementById('revenueByDay').innerHTML = res.byDay.length ? revenueTable(res.byDay, 'day', 'Date')
+      : '<div class="empty-note">No confirmed payments yet.</div>';
+  }
+
+  function revenueTable(rows, key, label){
+    var html = '<table style="width:100%;border-collapse:collapse;font-size:13px;">' +
+      '<tr style="text-align:left;border-bottom:2px solid #eee;">' +
+      '<th style="padding:6px 4px;">' + label + '</th><th>Regs</th><th>Adults</th><th>Kids</th><th>Revenue</th></tr>';
+    rows.forEach(function(row){
+      html += '<tr style="border-bottom:1px solid #f2f2f2;">' +
+        '<td style="padding:6px 4px;">' + escapeHtml(String(row[key])) + '</td>' +
+        '<td>' + row.registrations + '</td><td>' + row.adults + '</td><td>' + row.kids + '</td><td>₹' + row.revenue + '</td></tr>';
+    });
+    html += '</table>';
+    return html;
+  }
+
+  // ============== DELETED REGISTRATIONS ==============
+  async function loadDeletedRegistrations(){
+    var res = await api('GET', '/api/admin/deleted-registrations?pin=' + encodeURIComponent(PIN));
+    if(!res.success){ document.getElementById('deletedList').innerHTML = res.message; return; }
+    var rows = res.deleted || [];
+    document.getElementById('deletedCountBadge').innerText = rows.length;
+    document.getElementById('deletedList').innerHTML = rows.length
+      ? rows.map(renderDeletedRow).join('')
+      : '<div class="empty-note">No deleted registrations.</div>';
+  }
+
+  function renderDeletedRow(d, i){
+    var couponList = (d.couponIds||[]).join(', ') || '—';
+    var people = (d.adults||[]).concat(d.kids||[]).join(', ') || '—';
+    var refundNote;
+    if(!d.wasConfirmed){
+      refundNote = '<span class="pill" style="background:#f0f0f0;color:#888;">No payment had been confirmed - nothing to refund</span>';
+    } else if(d.refunded){
+      refundNote = '<span class="pill confirmed">Refunded ₹' + d.refundAmount + '</span>';
+    } else {
+      refundNote = '<span class="pill rejected">Refund owed: ₹' + d.refundAmount + '</span> ' +
+        '<button class="btn-secondary" onclick="markRefunded(' + d.id + ')">Mark as Refunded</button>';
+    }
+    return '<div class="reg-card">' +
+      '<div class="reg-head"><div><span class="sno">' + (i+1) + '</span>' +
+      '<span class="reg-id">' + d.regId + '</span> — ' + escapeHtml(d.flat) + phaseTag(d) + ' — ' + escapeHtml(d.contact) + '</div></div>' +
+      '<div class="reg-contact" style="margin-top:4px;">' + phoneLink(d.phone) + ' &middot; ₹' + d.total + '</div>' +
+      '<div class="reg-people">People: ' + escapeHtml(people) + '</div>' +
+      '<div class="reg-people">Coupon codes: ' + escapeHtml(couponList) + '</div>' +
+      '<div class="reg-people" style="margin-top:6px;">Deleted by ' + escapeHtml(d.deletedBy || '') +
+      (d.deletedAt ? (' on ' + new Date(d.deletedAt).toLocaleString()) : '') + '</div>' +
+      '<div class="reg-actions" style="margin-top:8px;">' + refundNote + '</div>' +
+      '</div>';
+  }
+
+  async function markRefunded(id){
+    if(!confirm('Confirm that this refund has actually been paid back to the family?')) return;
+    try{
+      var res = await api('POST', '/api/admin/mark-refunded', { pin: PIN, id: id });
+      if(!res.success){ alert(res.message); return; }
+      loadDeletedRegistrations();
+      loadRevenue();
+    }catch(err){ alert('Error: ' + err.message); }
   }
 
   function renderDashboard(dash){
@@ -560,6 +667,10 @@
       document.getElementById('manageLookup').value = '';
       MANAGED_REG = null;
       await refreshAll();
+      if(res.wasConfirmed && res.refundAmount > 0){
+        alert('This was a Confirmed (paid) registration. Since it is now deleted, please refund ₹' + res.refundAmount +
+          ' to the family - that amount was already counted as collected revenue. You can mark it as refunded once done, in the Deleted Registrations section.');
+      }
     }catch(err){ alert('Error: ' + err.message); }
   }
 
