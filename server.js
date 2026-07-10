@@ -309,9 +309,9 @@ app.get('/api/admin/share-coupons', async (req, res) => {
     const reg = regR.rows[0];
     const coupons = await getCouponsForReg(regId, baseUrl(req));
     if (!coupons.length) return res.json({ success: false, message: 'No coupons generated yet' });
-    let msg = 'Happy Onam ' + reg.contact + '! Your Aaravam Sadhya coupons for 5th Sept (DSR White Waters) are ready:\n\n';
+    let msg = 'Happy Onam ' + reg.contact + '! Your Aaravam Sadhya coupons are ready:\n\n';
     coupons.forEach(c => { msg += c.name + ' (' + c.type + '): ' + c.url + '\n'; });
-    msg += '\nOpen each link to view your coupon and pick your entry slot on the morning of 5th Sept.';
+    msg += '\nOpen each link to view your coupon and pick your entry slot.';
     res.json({ success: true, waUrl: buildWhatsAppLink(reg.phone, msg), phone: reg.phone });
   } catch (err) {
     console.error(err);
@@ -328,7 +328,7 @@ app.get('/api/admin/share-reminder', async (req, res) => {
     const reg = regR.rows[0];
     const coupons = await getCouponsForReg(regId, baseUrl(req));
     if (!coupons.length) return res.json({ success: false, message: 'No coupons generated yet' });
-    let msg = 'Good morning! It\'s Aaravam Sadhya day (DSR White Waters). Please pick your entry slot now:\n\n';
+    let msg = 'Good morning! It\'s Aaravam Sadhya day. Please pick your entry slot now:\n\n';
     coupons.forEach(c => {
       const status = c.slotNumber ? ('already booked Slot ' + c.slotNumber + ' - ' + c.slotTime) : 'not booked yet';
       msg += c.name + ' (' + c.type + ') - ' + status + ': ' + c.url + '\n';
@@ -350,7 +350,7 @@ app.get('/api/admin/share-rejection', async (req, res) => {
     if (!regR.rows.length) return res.json({ success: false, message: 'Registration not found' });
     const reg = regR.rows[0];
     if (reg.status !== 'Rejected') return res.json({ success: false, message: 'This registration is not currently rejected' });
-    let msg = 'Hello ' + reg.contact + ', regarding your Aaravam Sadhya registration ' + regId + ' (DSR White Waters, 5th Sept 2026):\n\n';
+    let msg = 'Hello ' + reg.contact + ', regarding your Aaravam Sadhya registration ' + regId + ':\n\n';
     msg += 'Unfortunately this registration could not be confirmed.\n';
     msg += 'Reason: ' + (reg.rejected_reason || 'Not specified') + '\n\n';
     msg += 'If you think this is a mistake, or would like to submit a fresh registration, please contact the Sadhya committee.';
@@ -563,23 +563,162 @@ app.post('/api/admin/delete-registration', async (req, res) => {
   if (!checkPin((req.body || {}).pin, 'admin')) return res.json({ success: false, message: 'Invalid admin PIN' });
   const client = await pool.connect();
   try {
-    const { regId } = req.body || {};
+    const body = req.body || {};
+    const { regId } = body;
+    const admin = findAdminUser(body.pin);
     await client.query('BEGIN');
     const r = await client.query('SELECT * FROM registrations WHERE reg_id = $1 FOR UPDATE', [regId]);
     if (!r.rows.length) {
       await client.query('ROLLBACK');
       return res.json({ success: false, message: 'Registration not found' });
     }
+    const reg = r.rows[0];
+
+    // Snapshot the registration + its coupons into an audit table BEFORE deleting, so the
+    // committee can still see who this was, which coupon codes existed, and - if this was a
+    // Confirmed (paid) family - exactly how much needs to be refunded to them.
+    const coupR = await client.query('SELECT coupon_id, name, type FROM coupons WHERE reg_id=$1 ORDER BY id', [regId]);
+    const couponIds = coupR.rows.map(c => c.coupon_id);
+    const wasConfirmed = reg.status === 'Confirmed';
+    const refundAmount = wasConfirmed ? (reg.total || 0) : 0;
+    // For Confirmed regs, the coupons table (not the stored name arrays) is the source of truth.
+    const snapAdults = wasConfirmed ? coupR.rows.filter(c => c.type === 'Adult').map(c => c.name) : (reg.adult_names || []);
+    const snapKids = wasConfirmed ? coupR.rows.filter(c => c.type === 'Kid').map(c => c.name) : (reg.kid_names || []);
+
+    const delId = await nextSeqInClient(client, 'deleted_registrations_id_seq');
+    await client.query(
+      `INSERT INTO deleted_registrations
+       (id, reg_id, flat, phase, contact, phone, adult_names, kid_names, coupon_ids, was_confirmed, total, refund_amount, deleted_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+      [delId, reg.reg_id, reg.flat, reg.phase || '', reg.contact, reg.phone,
+        JSON.stringify(snapAdults), JSON.stringify(snapKids), JSON.stringify(couponIds),
+        wasConfirmed, reg.total || 0, refundAmount, admin ? admin.name : 'Committee']
+    );
+
     await client.query('DELETE FROM coupons WHERE reg_id = $1', [regId]);
     await client.query('DELETE FROM registrations WHERE reg_id = $1', [regId]);
     await client.query('COMMIT');
-    res.json({ success: true });
+    res.json({ success: true, wasConfirmed, refundAmount });
   } catch (err) {
     await client.query('ROLLBACK');
     console.error(err);
     res.status(500).json({ success: false, message: 'Server error: ' + err.message });
   } finally {
     client.release();
+  }
+});
+
+// ================= ADMIN: DELETED REGISTRATIONS (audit trail + refunds) =================
+app.get('/api/admin/deleted-registrations', async (req, res) => {
+  if (!checkPin(req.query.pin, 'admin')) return res.json({ success: false, message: 'Invalid admin PIN' });
+  try {
+    const r = await pool.query('SELECT * FROM deleted_registrations ORDER BY deleted_at DESC');
+    const deleted = r.rows.map(d => ({
+      id: d.id, regId: d.reg_id, flat: d.flat || '', phase: d.phase || '',
+      contact: d.contact || '', phone: d.phone || '',
+      adults: d.adult_names || [], kids: d.kid_names || [], couponIds: d.coupon_ids || [],
+      wasConfirmed: d.was_confirmed, total: d.total, refundAmount: d.refund_amount,
+      refunded: d.refunded, refundedAt: d.refunded_at,
+      deletedBy: d.deleted_by, deletedAt: d.deleted_at
+    }));
+    res.json({ success: true, deleted });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Server error: ' + err.message });
+  }
+});
+
+app.post('/api/admin/mark-refunded', async (req, res) => {
+  const body = req.body || {};
+  if (!checkPin(body.pin, 'admin')) return res.json({ success: false, message: 'Invalid admin PIN' });
+  try {
+    const { id } = body;
+    const r = await pool.query(
+      'UPDATE deleted_registrations SET refunded=true, refunded_at=now() WHERE id=$1 RETURNING id',
+      [id]
+    );
+    if (!r.rows.length) return res.json({ success: false, message: 'Record not found' });
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Server error: ' + err.message });
+  }
+});
+
+// ================= ADMIN: REVENUE / CASH FLOW DASHBOARD =================
+app.get('/api/admin/revenue', async (req, res) => {
+  if (!checkPin(req.query.pin, 'admin')) return res.json({ success: false, message: 'Invalid admin PIN' });
+  try {
+    const regs = await pool.query('SELECT * FROM registrations ORDER BY id');
+    const coupons = await pool.query('SELECT * FROM coupons ORDER BY id');
+    const confirmedRows = regs.rows.filter(r => r.status === 'Confirmed');
+    const pendingRows = regs.rows.filter(r => r.status === 'Pending');
+
+    const activeCouponsByReg = {};
+    coupons.rows.forEach(c => {
+      if (!c.active) return;
+      if (!activeCouponsByReg[c.reg_id]) activeCouponsByReg[c.reg_id] = [];
+      activeCouponsByReg[c.reg_id].push(c);
+    });
+    function countFor(regId, type) {
+      return (activeCouponsByReg[regId] || []).filter(c => c.type === type).length;
+    }
+
+    const confirmedRevenue = confirmedRows.reduce((s, r) => s + (r.total || 0), 0);
+    const pendingRevenue = pendingRows.reduce((s, r) => s + (r.total || 0), 0);
+
+    let totalAdultsConfirmed = 0, totalKidsConfirmed = 0;
+    confirmedRows.forEach(r => {
+      totalAdultsConfirmed += countFor(r.reg_id, 'Adult');
+      totalKidsConfirmed += countFor(r.reg_id, 'Kid');
+    });
+    const adultRevenue = totalAdultsConfirmed * CFG.adultPrice;
+    const kidRevenue = totalKidsConfirmed * CFG.kidPrice;
+
+    // Revenue by Phase
+    const phaseMap = {};
+    confirmedRows.forEach(r => {
+      const ph = r.phase || 'Unspecified';
+      if (!phaseMap[ph]) phaseMap[ph] = { phase: ph, registrations: 0, adults: 0, kids: 0, revenue: 0 };
+      phaseMap[ph].registrations += 1;
+      phaseMap[ph].adults += countFor(r.reg_id, 'Adult');
+      phaseMap[ph].kids += countFor(r.reg_id, 'Kid');
+      phaseMap[ph].revenue += (r.total || 0);
+    });
+    const byPhase = Object.values(phaseMap).sort((a, b) => a.phase.localeCompare(b.phase));
+
+    // Revenue by Day (based on when payment was confirmed) - gives a simple cash-flow-over-time view
+    const dayMap = {};
+    confirmedRows.forEach(r => {
+      if (!r.confirmed_at) return;
+      const day = new Date(r.confirmed_at).toISOString().slice(0, 10);
+      if (!dayMap[day]) dayMap[day] = { day, registrations: 0, adults: 0, kids: 0, revenue: 0 };
+      dayMap[day].registrations += 1;
+      dayMap[day].adults += countFor(r.reg_id, 'Adult');
+      dayMap[day].kids += countFor(r.reg_id, 'Kid');
+      dayMap[day].revenue += (r.total || 0);
+    });
+    const byDay = Object.values(dayMap).sort((a, b) => a.day.localeCompare(b.day));
+
+    // Refunds owed - Confirmed registrations that were later deleted, and haven't been marked
+    // as refunded yet. This is money the committee already counted as collected, so removing
+    // the registration means it now needs to be paid back.
+    const delR = await pool.query('SELECT * FROM deleted_registrations ORDER BY deleted_at ASC');
+    const refundsOwedRows = delR.rows.filter(d => (d.refund_amount || 0) > 0 && !d.refunded);
+    const refundsOwedTotal = refundsOwedRows.reduce((s, d) => s + (d.refund_amount || 0), 0);
+    const refundsPaidTotal = delR.rows.filter(d => d.refunded).reduce((s, d) => s + (d.refund_amount || 0), 0);
+    const netRevenue = confirmedRevenue - refundsOwedTotal;
+
+    res.json({
+      success: true,
+      confirmedRevenue, pendingRevenue, adultRevenue, kidRevenue,
+      totalAdultsConfirmed, totalKidsConfirmed,
+      refundsOwedTotal, refundsOwedCount: refundsOwedRows.length, refundsPaidTotal,
+      netRevenue, byPhase, byDay
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Server error: ' + err.message });
   }
 });
 
