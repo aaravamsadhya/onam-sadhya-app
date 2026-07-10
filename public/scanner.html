@@ -34,6 +34,14 @@
   .window-warn{margin-top:10px;padding:8px 12px;border-radius:8px;background:rgba(0,0,0,.25);font-size:12px;}
   .err{color:#ff8080;font-size:13px;margin-top:8px;}
   #scanCount{font-size:12px;color:#888;text-align:center;}
+  .btn-group{background:#4a3aa8;color:#fff;width:100%;margin-top:8px;}
+  .btn-override{background:#0d6ea8;color:#fff;width:100%;margin-top:8px;}
+  .fam-row{display:flex;align-items:center;gap:10px;padding:8px 4px;border-bottom:1px solid #2a2a2a;font-size:14px;}
+  .fam-row input[type=checkbox]{width:20px;height:20px;flex:0 0 auto;}
+  .fam-row .fam-name{flex:1;}
+  .fam-row .fam-note{font-size:11px;color:#999;}
+  .fam-row.disabled-row{opacity:.4;}
+  .fam-row.done-row{opacity:.55;}
 </style>
 </head>
 <body>
@@ -67,7 +75,16 @@
         <div class="window-warn hidden" id="windowWarn"></div>
       </div>
       <button class="btn-primary hidden" id="admitBtn" onclick="admit()">✓ Admit Guest</button>
+      <button class="btn-override hidden" id="overrideBtn" onclick="overrideAndAdmit()">↪ Move to current slot &amp; Admit</button>
+      <button class="btn-group hidden" id="showFamilyBtn" onclick="showFamily()">👨‍👩‍👧‍👦 Show Full Family (Group Check-In)</button>
       <button class="btn-secondary" onclick="resumeScanning()">Scan Next</button>
+    </div>
+
+    <div class="card hidden" id="familyCard">
+      <div style="font-weight:700;margin-bottom:6px;" id="famHeading">Family</div>
+      <div id="famList"></div>
+      <button class="btn-primary" id="admitSelectedBtn" onclick="admitSelected()">✓ Admit Selected</button>
+      <button class="btn-secondary" onclick="closeFamily()">Close</button>
     </div>
   </div>
 </div>
@@ -78,6 +95,8 @@
   var currentToken = null;
   var busy = false;
   var scannedCount = 0;
+  var SLOTS = [];
+  var lastResult = null;
 
   async function api(method, url, body){
     var opts = { method: method, headers: {} };
@@ -96,10 +115,34 @@
       }
       document.getElementById('pinCard').classList.add('hidden');
       document.getElementById('scanArea').classList.remove('hidden');
+      try{ SLOTS = await api('GET', '/api/slots'); }catch(e){ SLOTS = []; }
       startScanner();
     }catch(err){
       document.getElementById('pinErr').innerText = 'Error: ' + err.message;
     }
+  }
+
+  // Figures out which slot's time window is happening right now, so the gate can offer to
+  // move a guest booked into a different slot into "whatever's actually running" instead of
+  // turning them away or breaking the schedule.
+  function slotWindow(slotTimeStr){
+    var m = /(\d+):(\d+)\s*(AM|PM)/i.exec(slotTimeStr || '');
+    if(!m) return null;
+    var h = parseInt(m[1],10), min = parseInt(m[2],10);
+    if(/pm/i.test(m[3]) && h !== 12) h += 12;
+    if(/am/i.test(m[3]) && h === 12) h = 0;
+    var start = new Date();
+    start.setHours(h, min, 0, 0);
+    return { start: new Date(start.getTime() - 15*60000), end: new Date(start.getTime() + 45*60000) };
+  }
+
+  function getRunningSlot(){
+    var now = new Date();
+    for(var i=0;i<SLOTS.length;i++){
+      var w = slotWindow(SLOTS[i].time);
+      if(w && now >= w.start && now <= w.end) return SLOTS[i];
+    }
+    return null;
   }
 
   function startScanner(){
@@ -141,12 +184,18 @@
   }
 
   function showResult(res){
+    lastResult = res;
     document.getElementById('resultCard').classList.remove('hidden');
     var box = document.getElementById('statusBox');
     var admitBtn = document.getElementById('admitBtn');
+    var overrideBtn = document.getElementById('overrideBtn');
+    var showFamilyBtn = document.getElementById('showFamilyBtn');
     var warnEl = document.getElementById('windowWarn');
     warnEl.classList.add('hidden');
     admitBtn.classList.add('hidden');
+    overrideBtn.classList.add('hidden');
+    showFamilyBtn.classList.add('hidden');
+    closeFamily();
 
     if(!res.found || res.status === 'not_found'){
       box.className = 'status-card bad';
@@ -157,6 +206,20 @@
       document.getElementById('stSlot').innerText = '';
       return;
     }
+    if(res.status === 'disabled'){
+      box.className = 'status-card bad';
+      document.getElementById('stIcon').innerText = '🚫';
+      document.getElementById('stTitle').innerText = 'COUPON CANCELLED';
+      document.getElementById('stSub').innerText = 'This coupon was disabled by the committee';
+      document.getElementById('stName').innerText = res.name + (res.type ? ' (' + res.type + ')' : '');
+      document.getElementById('stSlot').innerText = '';
+      return;
+    }
+
+    // Any recognized, non-cancelled coupon: offer to see the rest of the family for group
+    // check-in, so a family with many tickets doesn't need to be scanned one by one.
+    showFamilyBtn.classList.remove('hidden');
+
     if(res.status === 'already_used'){
       box.className = 'status-card warn';
       document.getElementById('stIcon').innerText = '⚠';
@@ -173,6 +236,11 @@
       document.getElementById('stSub').innerText = 'Guest has not selected a slot yet';
       document.getElementById('stName').innerText = res.name + (res.type ? ' (' + res.type + ')' : '');
       document.getElementById('stSlot').innerText = '';
+      var running0 = getRunningSlot();
+      if(running0){
+        overrideBtn.innerText = '↪ Book into Slot ' + running0.number + ' (' + running0.time + ') & Admit';
+        overrideBtn.classList.remove('hidden');
+      }
       return;
     }
     if(res.status === 'ready'){
@@ -188,6 +256,14 @@
         warnEl.innerText = w;
       }
       admitBtn.classList.remove('hidden');
+      // If this guest is booked into a slot other than the one actually running right now
+      // (e.g. a kid who wants to join friends in a different slot than their parent picked),
+      // offer to move just this one coupon into the running slot instead.
+      var running = getRunningSlot();
+      if(running && String(running.number) !== String(res.slotNumber)){
+        overrideBtn.innerText = '↪ Move to Slot ' + running.number + ' (' + running.time + ') & Admit';
+        overrideBtn.classList.remove('hidden');
+      }
     }
   }
 
@@ -225,6 +301,75 @@
     }catch(err){
       alert('Error checking in guest: ' + err.message);
     }
+  }
+
+  async function overrideAndAdmit(){
+    if(!currentToken) return;
+    var running = getRunningSlot();
+    if(!running){ alert('Could not determine which slot is running right now.'); return; }
+    if(!confirm('Move this person into Slot ' + running.number + ' (' + running.time + ') and admit them now?')) return;
+    try{
+      var res = await api('POST', '/api/scan/override-slot', { token: currentToken, slotNumber: running.number, pin: PIN });
+      if(!res.success){ alert(res.message); return; }
+      var admitRes = await api('POST', '/api/scan/checkin', { token: currentToken, pin: PIN });
+      if(admitRes.success){
+        var box = document.getElementById('statusBox');
+        box.className = 'status-card ok';
+        document.getElementById('stIcon').innerText = '✓';
+        document.getElementById('stTitle').innerText = 'ENTRY ALLOWED';
+        document.getElementById('stSub').innerText = 'Moved to Slot ' + running.number + ' and checked in';
+        document.getElementById('admitBtn').classList.add('hidden');
+        document.getElementById('overrideBtn').classList.add('hidden');
+        if(navigator.vibrate) navigator.vibrate(150);
+      } else {
+        showResult(admitRes);
+      }
+    }catch(err){ alert('Error: ' + err.message); }
+  }
+
+  // ============== GROUP CHECK-IN (whole family at once) ==============
+  async function showFamily(){
+    if(!currentToken) return;
+    try{
+      var res = await api('POST', '/api/scan/family', { token: currentToken, pin: PIN });
+      if(!res.found){ alert(res.message || 'Could not load family.'); return; }
+      document.getElementById('famHeading').innerText = (res.flat ? res.flat + ' — ' : '') + (res.contact || res.regId);
+      var html = '';
+      res.members.forEach(function(m){
+        var disabled = m.checkedIn;
+        var note = m.checkedIn ? 'Already checked in' : (m.slotNumber ? 'Slot ' + m.slotNumber + ' (' + m.slotTime + ')' : 'No slot booked');
+        html += '<div class="fam-row' + (m.checkedIn ? ' done-row' : '') + '">' +
+          '<input type="checkbox" data-coupon="' + m.couponId + '" ' + (disabled ? 'disabled' : (m.slotNumber ? 'checked' : '')) + '>' +
+          '<div class="fam-name">' + escapeHtmlS(m.name) + ' (' + (m.type==='Adult'?'A':'K') + ') — ' + m.couponId + '<br><span class="fam-note">' + note + '</span></div>' +
+          '</div>';
+      });
+      document.getElementById('famList').innerHTML = html;
+      document.getElementById('familyCard').classList.remove('hidden');
+    }catch(err){ alert('Error: ' + err.message); }
+  }
+
+  function escapeHtmlS(s){
+    return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  async function admitSelected(){
+    var boxes = document.querySelectorAll('#famList input[type=checkbox]:checked:not(:disabled)');
+    var couponIds = Array.prototype.map.call(boxes, function(b){ return b.getAttribute('data-coupon'); });
+    if(!couponIds.length){ alert('No one selected to admit.'); return; }
+    try{
+      var res = await api('POST', '/api/scan/checkin-batch', { couponIds: couponIds, pin: PIN });
+      if(!res.success){ alert('Error admitting family.'); return; }
+      var admitted = res.results.filter(function(r){ return r.ok; }).length;
+      var skipped = res.results.length - admitted;
+      alert('Admitted ' + admitted + ' of ' + res.results.length + ' selected' + (skipped ? (' (' + skipped + ' skipped — already used, disabled, or no slot)') : '') + '.');
+      if(navigator.vibrate) navigator.vibrate(150);
+      closeFamily();
+      resumeScanning();
+    }catch(err){ alert('Error: ' + err.message); }
+  }
+
+  function closeFamily(){
+    document.getElementById('familyCard').classList.add('hidden');
   }
 
   function resumeScanning(){
