@@ -6,6 +6,8 @@
 <title>Aaravam - Your Coupon</title>
 <link href="https://fonts.googleapis.com/css2?family=Yatra+One&family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
   :root{--gold:#F5B70A;--gold-dark:#C9860A;--leaf:#0B6E4F;--leaf-dark:#064E38;--maroon:#8E1B1B;--cream:#FFF8E1;}
   *{box-sizing:border-box;}
@@ -32,6 +34,11 @@
   .slot-colors .sw{width:14px;height:14px;border-radius:4px;}
   .slot-color-note{font-size:11px;color:#8a7a4d;margin-top:4px;}
   .coupon-foot{background:var(--leaf-dark);color:#fff;font-size:11px;padding:8px;}
+  .dl-row{padding:14px 4px 4px;text-align:center;}
+  .dl-hint{font-size:12px;color:#8a7a4d;margin:0 0 10px;}
+  .btn-dl{cursor:pointer;border:none;border-radius:8px;font-family:inherit;font-weight:700;font-size:13px;padding:10px 14px;background:var(--leaf);color:#fff;margin:0 4px 6px;}
+  .btn-dl-alt{background:var(--gold-dark);}
+  .dl-status{font-size:11px;color:#8a7a4d;margin-top:4px;min-height:14px;}
 
   h3{font-size:16px;color:var(--leaf-dark);margin:0 0 12px;border-bottom:2px solid var(--gold);padding-bottom:6px;}
   .slot-option{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;border:1.5px solid #e2d9b8;border-radius:10px;margin-bottom:8px;cursor:pointer;background:#fffdf5;}
@@ -86,6 +93,12 @@
         <div class="coupon-foot">Show this QR at the clubhouse entrance</div>
         <div class="coupon-bottom"></div>
       </div>
+      <div class="dl-row" id="dlRow">
+        <p class="dl-hint">Save a copy to your phone now, in case the app is unreachable on the day.</p>
+        <button class="btn-dl" onclick="downloadCouponPNG()">📥 Save as Image</button>
+        <button class="btn-dl btn-dl-alt" onclick="downloadCouponPDF()">📄 Save as PDF</button>
+        <div class="dl-status" id="dlStatus"></div>
+      </div>
     </div>
 
     <div class="card" id="slotCard">
@@ -114,6 +127,53 @@
     badge.style.background = slotColor(num);
     badge.style.color = slotTextColor(num);
     el('slotColorNote').innerText = 'Show this colour at the gate for a quick, no-scan check.';
+  }
+
+  // Lets a resident save their own coupon as an image/PDF onto their phone, so it's still
+  // viewable (and showable at the gate) even if the app itself is unreachable on event day.
+  function couponFileBase(){
+    return 'Aaravam-Coupon-' + (myInfo ? myInfo.couponId : 'unknown');
+  }
+
+  function setDlStatus(text){
+    var el2 = el('dlStatus');
+    if(el2) el2.innerText = text || '';
+  }
+
+  async function captureCouponCanvas(){
+    var node = document.querySelector('.coupon');
+    return html2canvas(node, { backgroundColor: '#ffffff', scale: 2 });
+  }
+
+  async function downloadCouponPNG(){
+    setDlStatus('Preparing image…');
+    try{
+      var canvas = await captureCouponCanvas();
+      var link = document.createElement('a');
+      link.download = couponFileBase() + '.png';
+      link.href = canvas.toDataURL('image/png');
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setDlStatus('Saved to your downloads.');
+    }catch(err){
+      setDlStatus('Could not save image: ' + err.message);
+    }
+  }
+
+  async function downloadCouponPDF(){
+    setDlStatus('Preparing PDF…');
+    try{
+      var canvas = await captureCouponCanvas();
+      var jsPDFCtor = (window.jspdf && window.jspdf.jsPDF) ? window.jspdf.jsPDF : null;
+      if(!jsPDFCtor) throw new Error('PDF library did not load');
+      var pdf = new jsPDFCtor({ unit: 'px', format: [canvas.width, canvas.height] });
+      pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, canvas.width, canvas.height);
+      pdf.save(couponFileBase() + '.pdf');
+      setDlStatus('Saved to your downloads.');
+    }catch(err){
+      setDlStatus('Could not save PDF: ' + err.message);
+    }
   }
 
   async function api(method, url, body){
@@ -209,6 +269,10 @@
       el('slotHeading').innerText = 'Your Slot';
       showMsg('Slot confirmed! See you at the Sadhya.', 'ok');
       renderBookedState();
+      // Auto-save a copy the moment the slot is locked in, so residents end up with an offline
+      // backup even if they never notice/tap the manual save buttons themselves. Small delay so
+      // the badge's new colour/text has actually repainted before it gets captured.
+      setTimeout(function(){ downloadCouponPNG(); }, 350);
     }catch(err){
       showMsg('Something went wrong: ' + err.message, 'err');
     }
