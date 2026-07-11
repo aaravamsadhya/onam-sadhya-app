@@ -196,13 +196,16 @@ app.get('/api/admin/registrations', async (req, res) => {
   try {
     const r = await pool.query('SELECT * FROM registrations ORDER BY id ASC');
     const coupR = await pool.query(
-      'SELECT reg_id, coupon_id, name, type, slot_number, slot_time, checked_in, active FROM coupons ORDER BY id ASC'
+      'SELECT reg_id, coupon_id, token, name, type, slot_number, slot_time, checked_in, active FROM coupons ORDER BY id ASC'
     );
     const couponsByReg = {};
     coupR.rows.forEach(c => {
       if (!couponsByReg[c.reg_id]) couponsByReg[c.reg_id] = [];
       couponsByReg[c.reg_id].push({
         couponId: c.coupon_id, name: c.name, type: c.type,
+        // url lets the admin console render the exact same QR the resident sees, so it can
+        // offer a "download this person's coupon" backup without needing a separate endpoint.
+        url: baseUrl(req) + '/?t=' + c.token,
         slotNumber: c.slot_number, slotTime: c.slot_time, checkedIn: c.checked_in, active: c.active
       });
     });
