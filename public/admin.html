@@ -5,6 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Aaravam - Admin</title>
 <link href="https://fonts.googleapis.com/css2?family=Yatra+One&family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <style>
   :root{--gold:#F5B70A;--gold-dark:#C9860A;--leaf:#0B6E4F;--leaf-dark:#064E38;--maroon:#8E1B1B;--cream:#FFF8E1;}
   *{box-sizing:border-box;}
@@ -78,6 +82,29 @@
   .phase-tag{display:inline-block;background:#eee;color:#555;font-size:10px;font-weight:700;border-radius:6px;padding:2px 6px;margin-left:6px;}
   .who-badge{background:rgba(255,255,255,.15);border-radius:20px;padding:4px 12px;font-size:12px;display:inline-block;margin-top:6px;}
   select.mgr-select{width:100%;padding:10px 12px;border:1.5px solid #ddd;border-radius:8px;font-size:15px;font-family:inherit;background:#fff;}
+
+  .chip-dl{border:none;background:var(--gold-dark);color:#fff;border-radius:10px;font-size:11px;padding:3px 7px;cursor:pointer;}
+  .bulk-filters{display:flex;gap:8px;margin-bottom:10px;}
+  .bulk-filters select{flex:1;padding:10px 12px;border:1.5px solid #ddd;border-radius:8px;font-size:14px;font-family:inherit;background:#fff;}
+  .bulk-status{font-size:12px;color:#8a7a4d;margin-top:8px;min-height:16px;}
+
+  /* Off-screen coupon-card template used to render individual/bulk coupon backups - same
+     visual design as the resident-facing coupon page, so what gets handed out at the gate
+     matches what's on the resident's phone. */
+  #couponRenderZone{position:fixed;left:-9999px;top:0;}
+  #rzCoupon.coupon{width:300px;border-radius:16px;overflow:hidden;border:3px solid var(--gold-dark);background:var(--cream);text-align:center;}
+  #rzCoupon .coupon-top,#rzCoupon .coupon-bottom{background:repeating-linear-gradient(135deg,var(--leaf) 0 10px,var(--leaf-dark) 10px 20px);height:10px;}
+  #rzCoupon .coupon-head{background:linear-gradient(90deg,var(--gold),#FFD75E);padding:14px 10px 10px;}
+  #rzCoupon .coupon-head h2{font-family:'Yatra One',cursive;margin:0;font-size:24px;color:var(--maroon);}
+  #rzCoupon .coupon-head p{margin:2px 0 0;font-size:12px;color:#5a3d00;font-weight:600;}
+  #rzCoupon .coupon-body{padding:18px;}
+  #rzQr{display:inline-block;background:#fff;padding:10px;border-radius:10px;border:2px dashed var(--gold-dark);}
+  #rzCoupon .coupon-id{font-size:22px;font-weight:800;color:var(--maroon);margin-top:10px;}
+  #rzCoupon .coupon-name{font-size:17px;font-weight:700;color:var(--leaf-dark);margin-top:2px;}
+  #rzCoupon .type-badge{display:inline-block;margin-top:4px;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;background:#fff;border:1px solid var(--gold-dark);color:var(--gold-dark);}
+  #rzCoupon .slot-badge{display:inline-block;margin-top:12px;padding:8px 16px;border-radius:24px;background:var(--leaf);color:#fff;font-weight:700;font-size:14px;}
+  #rzCoupon .slot-badge.none{background:#eee !important;color:#888 !important;}
+  #rzCoupon .coupon-foot{background:var(--leaf-dark);color:#fff;font-size:11px;padding:8px;}
 </style>
 </head>
 <body>
@@ -150,6 +177,29 @@
     </div>
 
     <div class="card">
+      <h2>📦 Coupon Backup (for an app outage on event day)</h2>
+      <p style="font-size:12px;color:#8a7a4d;margin:0 0 10px;">Generates a backup of every Confirmed, slot-booked coupon - a ZIP of individual coupon images, and a printable roster PDF - so gate volunteers can still admit people by hand if the app itself is ever unreachable.</p>
+      <div class="bulk-filters">
+        <select id="bulkPhase">
+          <option value="">All Phases</option>
+          <option value="PH1">PH1</option>
+          <option value="PH2">PH2</option>
+        </select>
+        <select id="bulkSlot">
+          <option value="">All Slots</option>
+          <option value="1">Slot 1</option>
+          <option value="2">Slot 2</option>
+          <option value="3">Slot 3</option>
+          <option value="4">Slot 4</option>
+          <option value="5">Slot 5</option>
+        </select>
+      </div>
+      <button class="btn-confirm" style="width:100%;" onclick="bulkDownloadZip()">⬇ Download ZIP of Coupon Images</button>
+      <button class="btn-secondary" style="width:100%;" onclick="bulkDownloadList()">⬇ Download Printable List (PDF)</button>
+      <div class="bulk-status" id="bulkStatus"></div>
+    </div>
+
+    <div class="card">
       <h2>Search / Manage Individual Coupons</h2>
       <input type="text" id="searchQ" placeholder="Search by name, phone, or coupon ID">
       <button class="btn-secondary" onclick="doSearch()" style="width:100%;margin-top:8px;">Search</button>
@@ -201,6 +251,25 @@
   </div>
 </div>
 
+<div id="couponRenderZone">
+  <div class="coupon" id="rzCoupon">
+    <div class="coupon-top"></div>
+    <div class="coupon-head">
+      <h2>Aaravam</h2>
+      <p>Sadhya Coupon &middot; 2026</p>
+    </div>
+    <div class="coupon-body">
+      <div id="rzQr"></div>
+      <div class="coupon-id" id="rzId"></div>
+      <div class="coupon-name" id="rzName"></div>
+      <div class="type-badge" id="rzType"></div>
+      <div id="rzSlot" class="slot-badge none">No slot selected yet</div>
+    </div>
+    <div class="coupon-foot">Show this QR at the clubhouse entrance</div>
+    <div class="coupon-bottom"></div>
+  </div>
+</div>
+
 <script>
   var PIN = '';
   var ADMIN_NAME = '';
@@ -211,6 +280,145 @@
     var r = await fetch(url, opts);
     if(!r.ok) throw new Error('Server error (' + r.status + ')');
     return r.json();
+  }
+
+  // ============== COUPON BACKUP (individual + bulk, for an app outage on event day) ==============
+  // Reuses the same slot colours as the guest coupon page and the scanner, so a backup image or
+  // a printed list still lines up visually/logically with what everyone else has been looking at.
+  var SLOT_COLORS = ['#F5B70A', '#0B6E4F', '#8E1B1B', '#1565C0', '#6A3AA8'];
+  function slotColor(n){ return SLOT_COLORS[(Number(n) - 1 + SLOT_COLORS.length) % SLOT_COLORS.length]; }
+  function slotTextColor(n){ return Number(n) === 1 ? '#3a2a00' : '#fff'; }
+
+  var COUPON_INDEX = {};
+  function indexCoupons(regs){
+    COUPON_INDEX = {};
+    regs.forEach(function(r){
+      (r.coupons||[]).forEach(function(c){
+        COUPON_INDEX[c.couponId] = {
+          couponId: c.couponId, name: c.name, type: c.type, url: c.url,
+          slotNumber: c.slotNumber, slotTime: c.slotTime, active: c.active,
+          flat: r.flat, phase: r.phase, regId: r.regId
+        };
+      });
+    });
+  }
+
+  // Renders one coupon into the off-screen template and captures it as a canvas, matching the
+  // exact visual design the resident sees on their own phone.
+  async function renderCouponCanvas(c){
+    document.getElementById('rzId').innerText = c.couponId;
+    document.getElementById('rzName').innerText = c.name;
+    document.getElementById('rzType').innerText = c.type || '';
+    var qrHolder = document.getElementById('rzQr');
+    qrHolder.innerHTML = '';
+    new QRCode(qrHolder, { text: c.url, width: 150, height: 150, colorDark: '#064E38', colorLight: '#ffffff' });
+    var slotEl = document.getElementById('rzSlot');
+    if(c.slotNumber){
+      slotEl.classList.remove('none');
+      slotEl.innerText = 'Slot ' + c.slotNumber + ' — ' + c.slotTime;
+      slotEl.style.background = slotColor(c.slotNumber);
+      slotEl.style.color = slotTextColor(c.slotNumber);
+    } else {
+      slotEl.classList.add('none');
+      slotEl.innerText = 'No slot selected yet';
+      slotEl.style.background = '';
+      slotEl.style.color = '';
+    }
+    await new Promise(function(r){ setTimeout(r, 120); }); // let the QR finish painting
+    return html2canvas(document.getElementById('rzCoupon'), { backgroundColor: '#ffffff', scale: 2 });
+  }
+
+  async function downloadSingleCoupon(couponId){
+    var c = COUPON_INDEX[couponId];
+    if(!c){ alert('Coupon not found - try refreshing the page.'); return; }
+    try{
+      var canvas = await renderCouponCanvas(c);
+      var link = document.createElement('a');
+      link.download = 'Aaravam-Coupon-' + c.couponId + '.png';
+      link.href = canvas.toDataURL('image/png');
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }catch(err){ alert('Could not generate coupon image: ' + err.message); }
+  }
+
+  function bulkFilterCoupons(){
+    var phase = document.getElementById('bulkPhase').value;
+    var slot = document.getElementById('bulkSlot').value;
+    var list = [];
+    ALL_REGS.forEach(function(r){
+      if(r.status !== 'Confirmed') return;
+      if(phase && r.phase !== phase) return;
+      (r.coupons||[]).forEach(function(c){
+        if(c.active === false) return;
+        if(!c.slotNumber) return;
+        if(slot && String(c.slotNumber) !== String(slot)) return;
+        list.push({
+          couponId: c.couponId, name: c.name, type: c.type, url: c.url,
+          slotNumber: c.slotNumber, slotTime: c.slotTime,
+          flat: r.flat, phase: r.phase, regId: r.regId
+        });
+      });
+    });
+    list.sort(function(a, b){
+      if(a.slotNumber !== b.slotNumber) return a.slotNumber - b.slotNumber;
+      return (a.flat || '').localeCompare(b.flat || '');
+    });
+    return list;
+  }
+
+  async function bulkDownloadZip(){
+    var list = bulkFilterCoupons();
+    var statusEl = document.getElementById('bulkStatus');
+    if(!list.length){ statusEl.innerText = ''; alert('No confirmed, slot-booked coupons match this filter.'); return; }
+    var zip = new JSZip();
+    for(var i = 0; i < list.length; i++){
+      statusEl.innerText = 'Rendering ' + (i + 1) + ' of ' + list.length + '…';
+      var canvas = await renderCouponCanvas(list[i]);
+      var dataUrl = canvas.toDataURL('image/png');
+      zip.file('Aaravam-Coupon-' + list[i].couponId + '.png', dataUrl.split(',')[1], { base64: true });
+    }
+    statusEl.innerText = 'Zipping…';
+    var blob = await zip.generateAsync({ type: 'blob' });
+    var link = document.createElement('a');
+    link.download = 'Aaravam-Coupons-Backup.zip';
+    link.href = URL.createObjectURL(blob);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    statusEl.innerText = 'Done — ' + list.length + ' coupon image(s) in the zip.';
+  }
+
+  function bulkDownloadList(){
+    var list = bulkFilterCoupons();
+    var statusEl = document.getElementById('bulkStatus');
+    if(!list.length){ statusEl.innerText = ''; alert('No confirmed, slot-booked coupons match this filter.'); return; }
+    var jsPDFCtor = (window.jspdf && window.jspdf.jsPDF) ? window.jspdf.jsPDF : null;
+    if(!jsPDFCtor){ alert('PDF library did not load - check your internet connection and try again.'); return; }
+    var pdf = new jsPDFCtor({ unit: 'pt', format: 'a4' });
+    var y = 40;
+    pdf.setFontSize(16);
+    pdf.text('Aaravam Sadhya — Gate Backup List', 40, y);
+    y += 18;
+    pdf.setFontSize(9);
+    pdf.text('Generated ' + new Date().toLocaleString() + '  ·  ' + list.length + ' coupon(s)', 40, y);
+    y += 22;
+    var headers = ['#', 'Coupon ID', 'Name', 'Type', 'Flat', 'Phase', 'Slot'];
+    var colX = [40, 70, 150, 290, 330, 400, 440];
+    pdf.setFontSize(10);
+    headers.forEach(function(h, i){ pdf.text(h, colX[i], y); });
+    y += 6;
+    pdf.line(40, y, 555, y);
+    y += 14;
+    pdf.setFontSize(9);
+    list.forEach(function(c, i){
+      if(y > 780){ pdf.addPage(); y = 40; }
+      var row = [String(i + 1), c.couponId, c.name, c.type, c.flat || '', c.phase || '', 'Slot ' + c.slotNumber + ' (' + c.slotTime + ')'];
+      row.forEach(function(v, j){ pdf.text(String(v), colX[j], y); });
+      y += 16;
+    });
+    pdf.save('Aaravam-Gate-Backup-List.pdf');
+    statusEl.innerText = 'Done — ' + list.length + ' coupon(s) in the list.';
   }
 
   async function login(){
@@ -368,6 +576,7 @@
       return;
     }
     ALL_REGS = res.registrations || [];
+    indexCoupons(ALL_REGS);
     renderAll();
   }
 
@@ -454,8 +663,17 @@
     return '<span class="' + cls + '" title="' + escapeHtml(title) + '">' + escapeHtml(label) + '</span>';
   }
 
+  function couponRowChip(c){
+    // A coupon can only be usefully downloaded once it has a slot booked - before that it's
+    // just a bare ID with nothing for gate staff to check it against.
+    var dl = (c.slotNumber && c.active !== false)
+      ? '<button class="chip-dl" onclick="downloadSingleCoupon(\'' + c.couponId + '\')" title="Download this coupon">⬇</button>'
+      : '';
+    return couponChip(c) + dl;
+  }
+
   function renderConfirmedRow(r, i){
-    var chips = (r.coupons||[]).map(couponChip).join('');
+    var chips = (r.coupons||[]).map(couponRowChip).join('');
     return '<div class="reg-card">' +
       '<div class="reg-head"><div><span class="sno">' + (i+1) + '</span>' +
       '<span class="reg-id">' + r.regId + '</span> — ' + escapeHtml(r.flat) + phaseTag(r) + ' — ' + escapeHtml(r.contact) + '</div>' +
@@ -686,4 +904,3 @@
 </script>
 </body>
 </html>
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               
