@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Aaravam - Admin</title>
 <link href="https://fonts.googleapis.com/css2?family=Yatra+One&family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
@@ -273,6 +272,7 @@
 <script>
   var PIN = '';
   var ADMIN_NAME = '';
+  var IS_READONLY = false;
 
   async function api(method, url, body){
     var opts = { method: method, headers: {} };
@@ -295,7 +295,7 @@
     regs.forEach(function(r){
       (r.coupons||[]).forEach(function(c){
         COUPON_INDEX[c.couponId] = {
-          couponId: c.couponId, name: c.name, type: c.type, url: c.url,
+          couponId: c.couponId, name: c.name, type: c.type, url: c.url, qr: c.qr,
           slotNumber: c.slotNumber, slotTime: c.slotTime, active: c.active,
           flat: r.flat, phase: r.phase, regId: r.regId
         };
@@ -309,9 +309,26 @@
     document.getElementById('rzId').innerText = c.couponId;
     document.getElementById('rzName').innerText = c.name;
     document.getElementById('rzType').innerText = c.type || '';
+    // QR now comes pre-rendered as a PNG from the server (see the qr field on
+    // /api/admin/registrations) instead of being drawn in-browser by a CDN script, which some
+    // ad-blockers/network filters were silently blocking and leaving blank.
     var qrHolder = document.getElementById('rzQr');
     qrHolder.innerHTML = '';
-    new QRCode(qrHolder, { text: c.url, width: 150, height: 150, colorDark: '#064E38', colorLight: '#ffffff' });
+    var qrImg = null;
+    if(c.qr){
+      qrImg = document.createElement('img');
+      qrImg.src = c.qr;
+      qrImg.width = 150;
+      qrImg.height = 150;
+      qrImg.alt = 'Coupon QR code';
+      qrHolder.appendChild(qrImg);
+    } else {
+      var qrFallback = document.createElement('div');
+      qrFallback.style.cssText = 'width:150px;height:150px;display:flex;align-items:center;justify-content:center;font-size:11px;color:#999;text-align:center;padding:6px;';
+      qrFallback.innerText = 'QR unavailable — Coupon ' + c.couponId;
+      qrHolder.appendChild(qrFallback);
+    }
+    if(qrImg && qrImg.decode){ try{ await qrImg.decode(); }catch(e){} }
     var slotEl = document.getElementById('rzSlot');
     if(c.slotNumber){
       slotEl.classList.remove('none');
@@ -354,7 +371,7 @@
         if(!c.slotNumber) return;
         if(slot && String(c.slotNumber) !== String(slot)) return;
         list.push({
-          couponId: c.couponId, name: c.name, type: c.type, url: c.url,
+          couponId: c.couponId, name: c.name, type: c.type, url: c.url, qr: c.qr,
           slotNumber: c.slotNumber, slotTime: c.slotTime,
           flat: r.flat, phase: r.phase, regId: r.regId
         });
@@ -430,8 +447,10 @@
         return;
       }
       ADMIN_NAME = dash.adminName || 'Committee';
+      IS_READONLY = !!dash.readOnly;
       document.getElementById('pinCard').classList.add('hidden');
       document.getElementById('mainArea').classList.remove('hidden');
+      applyReadOnlyMode();
       renderDashboard(dash);
       loadRegistrations();
       loadRevenue();
@@ -441,9 +460,20 @@
     }
   }
 
+  function applyReadOnlyMode(){
+    if(!IS_READONLY) return;
+    document.getElementById('manageCard').classList.add('hidden');
+    var badge = document.getElementById('whoBadge');
+    var tag = document.createElement('span');
+    tag.style.cssText = 'background:#FFF3CD;color:#8a6d00;padding:2px 8px;border-radius:10px;font-size:11px;margin-left:6px;font-weight:700;';
+    tag.innerText = '👁 View only';
+    badge.appendChild(tag);
+  }
+
   function logout(){
     PIN = '';
     ADMIN_NAME = '';
+    IS_READONLY = false;
     ALL_REGS = [];
     document.getElementById('mainArea').classList.add('hidden');
     document.getElementById('pinCard').classList.remove('hidden');
@@ -516,7 +546,7 @@
       refundNote = '<span class="pill confirmed">Refunded ₹' + d.refundAmount + '</span>';
     } else {
       refundNote = '<span class="pill rejected">Refund owed: ₹' + d.refundAmount + '</span> ' +
-        '<button class="btn-secondary" onclick="markRefunded(' + d.id + ')">Mark as Refunded</button>';
+        (IS_READONLY ? '' : '<button class="btn-secondary" onclick="markRefunded(' + d.id + ')">Mark as Refunded</button>');
     }
     return '<div class="reg-card">' +
       '<div class="reg-head"><div><span class="sno">' + (i+1) + '</span>' +
@@ -638,6 +668,12 @@
   }
 
   function renderPendingRow(r, i){
+    var actions = IS_READONLY ? '' :
+      '<div class="reg-actions">' +
+      '<button class="btn-confirm" onclick="confirmPayment(\'' + r.regId + '\')">✓ Confirm Payment &amp; Generate Coupons</button>' +
+      '<button class="btn-manage" onclick="manageReg(\'' + r.regId + '\')">✎ Manage</button>' +
+      '<button class="btn-reject" onclick="rejectReg(\'' + r.regId + '\')">✕ Reject</button>' +
+      '</div>';
     return '<div class="reg-card">' +
       '<div class="reg-head"><div><span class="sno">' + (i+1) + '</span>' +
       '<span class="reg-id">' + r.regId + '</span> — ' + escapeHtml(r.flat) + phaseTag(r) + ' — ' + escapeHtml(r.contact) + '</div>' +
@@ -645,11 +681,7 @@
       '<div class="reg-contact" style="margin-top:4px;">' + phoneLink(r.phone) + ' &middot; ₹' + r.total +
       (r.txnRef ? (' &middot; Ref: ' + escapeHtml(r.txnRef)) : '') + '</div>' +
       '<div class="reg-people">Adults: ' + ((r.adults||[]).join(', ') || '—') + '<br>Kids: ' + ((r.kids||[]).join(', ') || '—') + '</div>' +
-      '<div class="reg-actions">' +
-      '<button class="btn-confirm" onclick="confirmPayment(\'' + r.regId + '\')">✓ Confirm Payment &amp; Generate Coupons</button>' +
-      '<button class="btn-manage" onclick="manageReg(\'' + r.regId + '\')">✎ Manage</button>' +
-      '<button class="btn-reject" onclick="rejectReg(\'' + r.regId + '\')">✕ Reject</button>' +
-      '</div></div>';
+      actions + '</div>';
   }
 
   function couponChip(c){
@@ -674,6 +706,12 @@
 
   function renderConfirmedRow(r, i){
     var chips = (r.coupons||[]).map(couponRowChip).join('');
+    var actions = IS_READONLY ? '' :
+      '<div class="reg-actions">' +
+      '<button class="btn-wa" onclick="shareCoupons(\'' + r.regId + '\')">📱 Share Coupons on WhatsApp</button>' +
+      '<button class="btn-secondary" onclick="shareReminder(\'' + r.regId + '\')">⏰ Send Slot Reminder</button>' +
+      '<button class="btn-manage" onclick="manageReg(\'' + r.regId + '\')">✎ Manage</button>' +
+      '</div>';
     return '<div class="reg-card">' +
       '<div class="reg-head"><div><span class="sno">' + (i+1) + '</span>' +
       '<span class="reg-id">' + r.regId + '</span> — ' + escapeHtml(r.flat) + phaseTag(r) + ' — ' + escapeHtml(r.contact) + '</div>' +
@@ -682,14 +720,15 @@
       (r.confirmedBy ? (' &middot; Confirmed by ' + escapeHtml(r.confirmedBy)) : '') + '</div>' +
       '<div class="reg-people">Adults: ' + ((r.adults||[]).join(', ') || '—') + '<br>Kids: ' + ((r.kids||[]).join(', ') || '—') + '</div>' +
       '<div class="coupon-chips">' + (chips || '<span class="empty-note">No coupons found</span>') + '</div>' +
-      '<div class="reg-actions">' +
-      '<button class="btn-wa" onclick="shareCoupons(\'' + r.regId + '\')">📱 Share Coupons on WhatsApp</button>' +
-      '<button class="btn-secondary" onclick="shareReminder(\'' + r.regId + '\')">⏰ Send Slot Reminder</button>' +
-      '<button class="btn-manage" onclick="manageReg(\'' + r.regId + '\')">✎ Manage</button>' +
-      '</div></div>';
+      actions + '</div>';
   }
 
   function renderRejectedRow(r, i){
+    var actions = IS_READONLY ? '' :
+      '<div class="reg-actions">' +
+      '<button class="btn-wa" onclick="shareRejection(\'' + r.regId + '\')">📱 Notify via WhatsApp</button>' +
+      '<button class="btn-restore" onclick="restoreReg(\'' + r.regId + '\')">↩ Restore to Pending</button>' +
+      '</div>';
     return '<div class="reg-card">' +
       '<div class="reg-head"><div><span class="sno">' + (i+1) + '</span>' +
       '<span class="reg-id">' + r.regId + '</span> — ' + escapeHtml(r.flat) + phaseTag(r) + ' — ' + escapeHtml(r.contact) + '</div>' +
@@ -698,10 +737,7 @@
       '<div class="reg-people">Adults: ' + ((r.adults||[]).join(', ') || '—') + '<br>Kids: ' + ((r.kids||[]).join(', ') || '—') + '</div>' +
       '<div class="reg-people" style="margin-top:6px;">Reason: ' + escapeHtml(r.rejectedReason || '—') +
       (r.rejectedBy ? (' &middot; by ' + escapeHtml(r.rejectedBy)) : '') + '</div>' +
-      '<div class="reg-actions">' +
-      '<button class="btn-wa" onclick="shareRejection(\'' + r.regId + '\')">📱 Notify via WhatsApp</button>' +
-      '<button class="btn-restore" onclick="restoreReg(\'' + r.regId + '\')">↩ Restore to Pending</button>' +
-      '</div></div>';
+      actions + '</div>';
   }
 
   async function confirmPayment(regId){
@@ -772,7 +808,7 @@
         '<span style="color:#888;">' + (r.phone||'') + (r.slotNumber ? (' &middot; Slot '+r.slotNumber+' ('+r.slotTime+')') : ' &middot; no slot yet') + '</span>' +
         '</div><div>' +
         statusPill + ' ' +
-        (r.active !== false && r.checkedIn ? '<button class="btn-secondary" onclick="doReset(\''+r.couponId+'\')">Undo</button>' : '') +
+        (r.active !== false && r.checkedIn && !IS_READONLY ? '<button class="btn-secondary" onclick="doReset(\''+r.couponId+'\')">Undo</button>' : '') +
         '</div></div>';
     });
     document.getElementById('searchResults').innerHTML = html || 'No matches.';
