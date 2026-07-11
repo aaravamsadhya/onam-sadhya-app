@@ -12,6 +12,7 @@
   "dependencies": {
     "express": "^4.19.2",
     "pg": "^8.11.5",
-    "exceljs": "^4.4.0"
+    "exceljs": "^4.4.0",
+    "qrcode": "^1.5.3"
   }
 }

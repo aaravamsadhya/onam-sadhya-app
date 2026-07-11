@@ -1,6 +1,7 @@
 const express = require('express');
 const path = require('path');
 const ExcelJS = require('exceljs');
+const QRCode = require('qrcode');
 const { pool, init } = require('./db');
 
 const app = express();
@@ -13,19 +14,44 @@ app.use(express.json());
 // under the name "Committee", so the app keeps working during the transition.
 function loadAdminUsers() {
   const raw = process.env.ADMIN_USERS;
+  let users = null;
   if (raw) {
     try {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length) {
-        return parsed
+        users = parsed
           .filter(u => u && u.pin)
-          .map(u => ({ name: String(u.name || 'Committee').trim(), pin: String(u.pin).trim() }));
+          .map(u => ({ name: String(u.name || 'Committee').trim(), pin: String(u.pin).trim(), readOnly: !!u.readOnly }));
       }
     } catch (e) {
       console.error('Could not parse ADMIN_USERS env variable as JSON, falling back to ADMIN_PIN:', e.message);
     }
   }
-  return [{ name: 'Committee', pin: String(process.env.ADMIN_PIN || '1234').trim() }];
+  if (!users) {
+    users = [{ name: 'Committee', pin: String(process.env.ADMIN_PIN || '1234').trim(), readOnly: false }];
+  }
+  // Always make sure a built-in view-only login exists ("roadmin"), so there's a safe PIN to
+  // hand out to anyone who just needs to see the dashboard without being able to
+  // confirm/reject/edit/delete/refund/send anything. If ADMIN_USERS already defines its own
+  // "roadmin" entry, that one wins instead of this default.
+  if (!users.some(u => u.name.toLowerCase() === 'roadmin')) {
+    users.push({
+      name: 'roadmin',
+      pin: String(process.env.ADMIN_READONLY_PIN || '1234').trim(),
+      readOnly: true
+    });
+  }
+  // Two admins sharing a PIN would silently give someone the wrong access level (whichever is
+  // defined first wins) - this can only happen from misconfiguration, but it's worth a loud
+  // warning in the logs rather than failing silently.
+  const seenPins = {};
+  users.forEach(u => {
+    if (seenPins[u.pin]) {
+      console.error('WARNING: admin users "' + seenPins[u.pin] + '" and "' + u.name + '" share the same PIN (' + u.pin + '). The first one defined wins - use distinct PINs.');
+    }
+    seenPins[u.pin] = u.name;
+  });
+  return users;
 }
 
 const CFG = {
@@ -51,6 +77,18 @@ function checkPin(pin, which) {
   return !!findAdminUser(pin);
 }
 
+// Guard for every admin endpoint that actually changes data. A read-only admin (see
+// loadAdminUsers) passes checkPin() just fine - they ARE a valid admin - so viewing endpoints
+// stay open to them, but every endpoint that writes to the database must use this instead, so
+// hiding the button in the UI isn't the only thing standing between a view-only PIN and a
+// real change (someone could otherwise still call the API directly).
+function requireWriteAccess(pin) {
+  const admin = findAdminUser(pin);
+  if (!admin) return { ok: false, message: 'Invalid admin PIN' };
+  if (admin.readOnly) return { ok: false, message: 'This PIN has view-only access and cannot make changes.' };
+  return { ok: true, admin };
+}
+
 function normalizePhone(phone) {
   let d = String(phone || '').replace(/\D/g, '');
   if (d.length === 10) d = '91' + d;
@@ -73,6 +111,20 @@ function pad3(n) {
 function baseUrl(req) {
   const proto = req.headers['x-forwarded-proto'] || req.protocol;
   return proto + '://' + req.get('host');
+}
+
+// Renders the QR as a PNG data URI on the server and hands it to the browser as plain JSON
+// data. The earlier approach used a client-side "qrcode.min.js" library loaded from a CDN,
+// which some ad-blockers and mobile network filters silently block (no error - it just never
+// draws), leaving a blank box. Generating the image server-side removes that dependency
+// entirely: the browser just displays a normal <img>, nothing to block.
+async function qrDataUrl(text) {
+  try {
+    return await QRCode.toDataURL(text, { margin: 1, width: 300, color: { dark: '#064E38', light: '#ffffff' } });
+  } catch (err) {
+    console.error('QR generation failed for', text, err.message);
+    return null;
+  }
 }
 
 // ================= STATIC PAGE ROUTING =================
@@ -198,16 +250,23 @@ app.get('/api/admin/registrations', async (req, res) => {
     const coupR = await pool.query(
       'SELECT reg_id, coupon_id, token, name, type, slot_number, slot_time, checked_in, active FROM coupons ORDER BY id ASC'
     );
-    const couponsByReg = {};
-    coupR.rows.forEach(c => {
-      if (!couponsByReg[c.reg_id]) couponsByReg[c.reg_id] = [];
-      couponsByReg[c.reg_id].push({
+    // QR images are only needed for coupons that already have a slot booked (that's the only
+    // case the admin console offers a download for), so skip generating one otherwise - keeps
+    // this endpoint fast even with a few hundred coupons.
+    const couponRows = await Promise.all(coupR.rows.map(async c => {
+      const url = baseUrl(req) + '/?t=' + c.token;
+      return {
+        regId: c.reg_id,
         couponId: c.coupon_id, name: c.name, type: c.type,
-        // url lets the admin console render the exact same QR the resident sees, so it can
-        // offer a "download this person's coupon" backup without needing a separate endpoint.
-        url: baseUrl(req) + '/?t=' + c.token,
+        url,
+        qr: c.slot_number ? await qrDataUrl(url) : null,
         slotNumber: c.slot_number, slotTime: c.slot_time, checkedIn: c.checked_in, active: c.active
-      });
+      };
+    }));
+    const couponsByReg = {};
+    couponRows.forEach(c => {
+      if (!couponsByReg[c.regId]) couponsByReg[c.regId] = [];
+      couponsByReg[c.regId].push(c);
     });
     const registrations = r.rows.map(row => {
       const coupons = couponsByReg[row.reg_id] || [];
@@ -242,12 +301,12 @@ app.get('/api/admin/registrations', async (req, res) => {
 });
 
 app.post('/api/admin/confirm', async (req, res) => {
-  if (!checkPin((req.body || {}).pin, 'admin')) return res.json({ success: false, message: 'Invalid admin PIN' });
+  const access = requireWriteAccess((req.body || {}).pin);
+  if (!access.ok) return res.json({ success: false, message: access.message });
   const client = await pool.connect();
   try {
     const { regId } = req.body || {};
-    const adminUser = findAdminUser((req.body || {}).pin);
-    const confirmedBy = adminUser ? adminUser.name : 'Committee';
+    const confirmedBy = access.admin ? access.admin.name : 'Committee';
     await client.query('BEGIN');
     const r = await client.query('SELECT * FROM registrations WHERE reg_id = $1 FOR UPDATE', [regId]);
     if (!r.rows.length) {
@@ -304,7 +363,8 @@ function buildWhatsAppLink(phone, message) {
 }
 
 app.get('/api/admin/share-coupons', async (req, res) => {
-  if (!checkPin(req.query.pin, 'admin')) return res.json({ success: false, message: 'Invalid admin PIN' });
+  const access = requireWriteAccess(req.query.pin);
+  if (!access.ok) return res.json({ success: false, message: access.message });
   try {
     const regId = req.query.regId;
     const regR = await pool.query('SELECT * FROM registrations WHERE reg_id=$1', [regId]);
@@ -323,7 +383,8 @@ app.get('/api/admin/share-coupons', async (req, res) => {
 });
 
 app.get('/api/admin/share-reminder', async (req, res) => {
-  if (!checkPin(req.query.pin, 'admin')) return res.json({ success: false, message: 'Invalid admin PIN' });
+  const access = requireWriteAccess(req.query.pin);
+  if (!access.ok) return res.json({ success: false, message: access.message });
   try {
     const regId = req.query.regId;
     const regR = await pool.query('SELECT * FROM registrations WHERE reg_id=$1', [regId]);
@@ -346,7 +407,8 @@ app.get('/api/admin/share-reminder', async (req, res) => {
 // Lets the committee notify a family via WhatsApp (same pattern as sharing coupons) when their
 // registration has been rejected, so they aren't just left wondering what happened.
 app.get('/api/admin/share-rejection', async (req, res) => {
-  if (!checkPin(req.query.pin, 'admin')) return res.json({ success: false, message: 'Invalid admin PIN' });
+  const access = requireWriteAccess(req.query.pin);
+  if (!access.ok) return res.json({ success: false, message: access.message });
   try {
     const regId = req.query.regId;
     const regR = await pool.query('SELECT * FROM registrations WHERE reg_id=$1', [regId]);
@@ -384,7 +446,8 @@ app.get('/api/admin/search', async (req, res) => {
 });
 
 app.post('/api/admin/reset-checkin', async (req, res) => {
-  if (!checkPin((req.body || {}).pin, 'admin')) return res.json({ success: false, message: 'Invalid admin PIN' });
+  const access = requireWriteAccess((req.body || {}).pin);
+  if (!access.ok) return res.json({ success: false, message: access.message });
   try {
     const { couponId } = req.body || {};
     const r = await pool.query(
@@ -406,10 +469,11 @@ app.post('/api/admin/reset-checkin', async (req, res) => {
 // should use Delete Registration instead, since coupons already exist for them.
 app.post('/api/admin/reject-registration', async (req, res) => {
   const body = req.body || {};
-  if (!checkPin(body.pin, 'admin')) return res.json({ success: false, message: 'Invalid admin PIN' });
+  const access = requireWriteAccess(body.pin);
+  if (!access.ok) return res.json({ success: false, message: access.message });
   try {
     const { regId, reason } = body;
-    const admin = findAdminUser(body.pin);
+    const admin = access.admin;
     const r = await pool.query('SELECT * FROM registrations WHERE reg_id = $1', [regId]);
     if (!r.rows.length) return res.json({ success: false, message: 'Registration not found' });
     const reg = r.rows[0];
@@ -429,7 +493,8 @@ app.post('/api/admin/reject-registration', async (req, res) => {
 
 app.post('/api/admin/restore-registration', async (req, res) => {
   const body = req.body || {};
-  if (!checkPin(body.pin, 'admin')) return res.json({ success: false, message: 'Invalid admin PIN' });
+  const access = requireWriteAccess(body.pin);
+  if (!access.ok) return res.json({ success: false, message: access.message });
   try {
     const { regId } = body;
     const r = await pool.query('SELECT * FROM registrations WHERE reg_id = $1', [regId]);
@@ -464,7 +529,8 @@ function diffNames(oldNames, newNames) {
 }
 
 app.post('/api/admin/update-registration', async (req, res) => {
-  if (!checkPin((req.body || {}).pin, 'admin')) return res.json({ success: false, message: 'Invalid admin PIN' });
+  const access = requireWriteAccess((req.body || {}).pin);
+  if (!access.ok) return res.json({ success: false, message: access.message });
   const client = await pool.connect();
   try {
     const body = req.body || {};
@@ -563,12 +629,13 @@ app.post('/api/admin/update-registration', async (req, res) => {
 });
 
 app.post('/api/admin/delete-registration', async (req, res) => {
-  if (!checkPin((req.body || {}).pin, 'admin')) return res.json({ success: false, message: 'Invalid admin PIN' });
+  const access = requireWriteAccess((req.body || {}).pin);
+  if (!access.ok) return res.json({ success: false, message: access.message });
   const client = await pool.connect();
   try {
     const body = req.body || {};
     const { regId } = body;
-    const admin = findAdminUser(body.pin);
+    const admin = access.admin;
     await client.query('BEGIN');
     const r = await client.query('SELECT * FROM registrations WHERE reg_id = $1 FOR UPDATE', [regId]);
     if (!r.rows.length) {
@@ -619,7 +686,8 @@ app.post('/api/admin/delete-registration', async (req, res) => {
 // action is irreversible and destroys real data, not just a soft-delete.
 app.post('/api/admin/reset-all-data', async (req, res) => {
   const body = req.body || {};
-  if (!checkPin(body.pin, 'admin')) return res.json({ success: false, message: 'Invalid admin PIN' });
+  const access = requireWriteAccess(body.pin);
+  if (!access.ok) return res.json({ success: false, message: access.message });
   if (body.confirm !== 'RESET') return res.json({ success: false, message: 'Confirmation text did not match. Nothing was deleted.' });
   const client = await pool.connect();
   try {
@@ -663,7 +731,8 @@ app.get('/api/admin/deleted-registrations', async (req, res) => {
 
 app.post('/api/admin/mark-refunded', async (req, res) => {
   const body = req.body || {};
-  if (!checkPin(body.pin, 'admin')) return res.json({ success: false, message: 'Invalid admin PIN' });
+  const access = requireWriteAccess(body.pin);
+  if (!access.ok) return res.json({ success: false, message: access.message });
   try {
     const { id } = body;
     const r = await pool.query(
@@ -767,7 +836,7 @@ app.get('/api/admin/dashboard', async (req, res) => {
     const confirmedCount = await pool.query("SELECT COUNT(*)::int AS n FROM registrations WHERE status = 'Confirmed'");
     const rejectedCount = await pool.query("SELECT COUNT(*)::int AS n FROM registrations WHERE status = 'Rejected'");
     res.json({
-      success: true, slots, adminName: admin ? admin.name : 'Committee',
+      success: true, slots, adminName: admin ? admin.name : 'Committee', readOnly: admin ? !!admin.readOnly : false,
       issued: coupCount.rows[0].n, booked: bookedCount.rows[0].n, checkedIn: checkedInCount.rows[0].n,
       pendingRegs: pendingCount.rows[0].n, confirmedRegs: confirmedCount.rows[0].n, rejectedRegs: rejectedCount.rows[0].n
     });
@@ -1030,10 +1099,12 @@ app.get('/api/coupon', async (req, res) => {
     const r = await pool.query('SELECT * FROM coupons WHERE token=$1', [token]);
     if (!r.rows.length) return res.json({ found: false });
     const c = r.rows[0];
+    const qr = await qrDataUrl(baseUrl(req) + '/?t=' + c.token);
     res.json({
       found: true, couponId: c.coupon_id, name: c.name, type: c.type,
       slotNumber: c.slot_number, slotTime: c.slot_time,
-      checkedIn: c.checked_in, checkedInTime: c.checked_in_at, active: c.active
+      checkedIn: c.checked_in, checkedInTime: c.checked_in_at, active: c.active,
+      qr
     });
   } catch (err) {
     console.error(err);
