@@ -8,6 +8,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
   :root{--gold:#F5B70A;--gold-dark:#C9860A;--leaf:#0B6E4F;--leaf-dark:#064E38;--maroon:#8E1B1B;--cream:#FFF8E1;}
   *{box-sizing:border-box;}
@@ -79,6 +80,7 @@
   .btn-reject{background:#FDECEA;color:#8E1B1B;}
   .btn-restore{background:#E6F4EA;color:#0B6E4F;}
   .phase-tag{display:inline-block;background:#eee;color:#555;font-size:10px;font-weight:700;border-radius:6px;padding:2px 6px;margin-left:6px;}
+  .tower-tag{display:inline-block;background:#E6F4EA;color:#0B6E4F;font-size:10px;font-weight:700;border-radius:6px;padding:2px 6px;margin-left:6px;}
   .who-badge{background:rgba(255,255,255,.15);border-radius:20px;padding:4px 12px;font-size:12px;display:inline-block;margin-top:6px;}
   select.mgr-select{width:100%;padding:10px 12px;border:1.5px solid #ddd;border-radius:8px;font-size:15px;font-family:inherit;background:#fff;}
 
@@ -184,6 +186,12 @@
           <option value="PH1">PH1</option>
           <option value="PH2">PH2</option>
         </select>
+        <select id="bulkTower">
+          <option value="">All Towers</option>
+          <option value="Tower A">Tower A</option>
+          <option value="Tower B">Tower B</option>
+          <option value="Tower C">Tower C</option>
+        </select>
         <select id="bulkSlot">
           <option value="">All Slots</option>
           <option value="1">Slot 1</option>
@@ -195,6 +203,7 @@
       </div>
       <button class="btn-confirm" style="width:100%;" onclick="bulkDownloadZip()">⬇ Download ZIP of Coupon Images</button>
       <button class="btn-secondary" style="width:100%;" onclick="bulkDownloadList()">⬇ Download Printable List (PDF)</button>
+      <button class="btn-secondary" style="width:100%;" onclick="bulkDownloadExcel()">⬇ Download Printable List (Excel)</button>
       <div class="bulk-status" id="bulkStatus"></div>
     </div>
 
@@ -223,6 +232,12 @@
         <select class="mgr-select" id="mPhase">
           <option value="PH1">PH1</option>
           <option value="PH2">PH2</option>
+        </select>
+        <label>Tower</label>
+        <select class="mgr-select" id="mTower">
+          <option value="Tower A">Tower A</option>
+          <option value="Tower B">Tower B</option>
+          <option value="Tower C">Tower C</option>
         </select>
         <label>Primary Contact Name</label>
         <input type="text" id="mContact">
@@ -297,7 +312,7 @@
         COUPON_INDEX[c.couponId] = {
           couponId: c.couponId, name: c.name, type: c.type, url: c.url, qr: c.qr,
           slotNumber: c.slotNumber, slotTime: c.slotTime, active: c.active,
-          flat: r.flat, phase: r.phase, regId: r.regId
+          flat: r.flat, phase: r.phase, tower: r.tower, regId: r.regId
         };
       });
     });
@@ -361,11 +376,13 @@
 
   function bulkFilterCoupons(){
     var phase = document.getElementById('bulkPhase').value;
+    var tower = document.getElementById('bulkTower').value;
     var slot = document.getElementById('bulkSlot').value;
     var list = [];
     ALL_REGS.forEach(function(r){
       if(r.status !== 'Confirmed') return;
       if(phase && r.phase !== phase) return;
+      if(tower && r.tower !== tower) return;
       (r.coupons||[]).forEach(function(c){
         if(c.active === false) return;
         if(!c.slotNumber) return;
@@ -373,7 +390,7 @@
         list.push({
           couponId: c.couponId, name: c.name, type: c.type, url: c.url, qr: c.qr,
           slotNumber: c.slotNumber, slotTime: c.slotTime,
-          flat: r.flat, phase: r.phase, regId: r.regId
+          flat: r.flat, phase: r.phase, tower: r.tower, regId: r.regId
         });
       });
     });
@@ -418,10 +435,10 @@
     pdf.text('Aaravam Sadhya — Gate Backup List', 40, y);
     y += 18;
     pdf.setFontSize(9);
-    pdf.text('Generated ' + new Date().toLocaleString() + '  ·  ' + list.length + ' coupon(s)', 40, y);
+    pdf.text('Generated ' + new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) + '  ·  ' + list.length + ' coupon(s)', 40, y);
     y += 22;
-    var headers = ['#', 'Coupon ID', 'Name', 'Type', 'Flat', 'Phase', 'Slot'];
-    var colX = [40, 70, 150, 290, 330, 400, 440];
+    var headers = ['#', 'Coupon ID', 'Name', 'Type', 'Flat', 'Twr', 'Phase', 'Slot'];
+    var colX = [40, 65, 125, 240, 275, 310, 345, 385];
     pdf.setFontSize(10);
     headers.forEach(function(h, i){ pdf.text(h, colX[i], y); });
     y += 6;
@@ -430,11 +447,39 @@
     pdf.setFontSize(9);
     list.forEach(function(c, i){
       if(y > 780){ pdf.addPage(); y = 40; }
-      var row = [String(i + 1), c.couponId, c.name, c.type, c.flat || '', c.phase || '', 'Slot ' + c.slotNumber + ' (' + c.slotTime + ')'];
+      var towerLetter = c.tower ? c.tower.replace('Tower ', '') : '';
+      var row = [String(i + 1), c.couponId, c.name, c.type, c.flat || '', towerLetter, c.phase || '', 'Slot ' + c.slotNumber + ' (' + c.slotTime + ')'];
       row.forEach(function(v, j){ pdf.text(String(v), colX[j], y); });
       y += 16;
     });
     pdf.save('Aaravam-Gate-Backup-List.pdf');
+    statusEl.innerText = 'Done — ' + list.length + ' coupon(s) in the list.';
+  }
+
+  // Excel counterpart to the PDF backup list above - same filtered data, same columns, just in a
+  // spreadsheet the committee can sort/filter themselves at the gate if they prefer that to a PDF.
+  function bulkDownloadExcel(){
+    var list = bulkFilterCoupons();
+    var statusEl = document.getElementById('bulkStatus');
+    if(!list.length){ statusEl.innerText = ''; alert('No confirmed, slot-booked coupons match this filter.'); return; }
+    if(!window.XLSX){ alert('Excel library did not load - check your internet connection and try again.'); return; }
+    var rows = list.map(function(c, i){
+      return {
+        '#': i + 1,
+        'Coupon ID': c.couponId,
+        'Name': c.name,
+        'Type': c.type,
+        'Flat': c.flat || '',
+        'Tower': c.tower || '',
+        'Phase': c.phase || '',
+        'Slot': 'Slot ' + c.slotNumber + ' (' + c.slotTime + ')'
+      };
+    });
+    var ws = XLSX.utils.json_to_sheet(rows);
+    ws['!cols'] = [{ wch: 4 }, { wch: 12 }, { wch: 22 }, { wch: 8 }, { wch: 10 }, { wch: 10 }, { wch: 8 }, { wch: 20 }];
+    var wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Gate Backup List');
+    XLSX.writeFile(wb, 'Aaravam-Gate-Backup-List.xlsx');
     statusEl.innerText = 'Done — ' + list.length + ' coupon(s) in the list.';
   }
 
@@ -550,12 +595,12 @@
     }
     return '<div class="reg-card">' +
       '<div class="reg-head"><div><span class="sno">' + (i+1) + '</span>' +
-      '<span class="reg-id">' + d.regId + '</span> — ' + escapeHtml(d.flat) + phaseTag(d) + ' — ' + escapeHtml(d.contact) + '</div></div>' +
+      '<span class="reg-id">' + d.regId + '</span> — ' + escapeHtml(d.flat) + phaseTag(d) + towerTag(d) + ' — ' + escapeHtml(d.contact) + '</div></div>' +
       '<div class="reg-contact" style="margin-top:4px;">' + phoneLink(d.phone) + ' &middot; ₹' + d.total + '</div>' +
       '<div class="reg-people">People: ' + escapeHtml(people) + '</div>' +
       '<div class="reg-people">Coupon codes: ' + escapeHtml(couponList) + '</div>' +
       '<div class="reg-people" style="margin-top:6px;">Deleted by ' + escapeHtml(d.deletedBy || '') +
-      (d.deletedAt ? (' on ' + new Date(d.deletedAt).toLocaleString()) : '') + '</div>' +
+      (d.deletedAt ? (' on ' + new Date(d.deletedAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })) : '') + '</div>' +
       '<div class="reg-actions" style="margin-top:8px;">' + refundNote + '</div>' +
       '</div>';
   }
@@ -619,6 +664,7 @@
       (r.contact||'').toLowerCase().indexOf(q) > -1 ||
       (r.phone||'').toLowerCase().indexOf(q) > -1 ||
       (r.regId||'').toLowerCase().indexOf(q) > -1 ||
+      (r.tower||'').toLowerCase().indexOf(q) > -1 ||
       (r.adults||[]).some(function(n){ return (n||'').toLowerCase().indexOf(q) > -1; }) ||
       (r.kids||[]).some(function(n){ return (n||'').toLowerCase().indexOf(q) > -1; });
   }
@@ -662,6 +708,10 @@
     return r.phase ? '<span class="phase-tag">' + escapeHtml(r.phase) + '</span>' : '';
   }
 
+  function towerTag(r){
+    return r.tower ? '<span class="tower-tag">' + escapeHtml(r.tower) + '</span>' : '';
+  }
+
   function phoneLink(phone){
     if(!phone) return '';
     return '<a class="phone-link" href="tel:+' + phone + '">' + phone + '</a>';
@@ -676,7 +726,7 @@
       '</div>';
     return '<div class="reg-card">' +
       '<div class="reg-head"><div><span class="sno">' + (i+1) + '</span>' +
-      '<span class="reg-id">' + r.regId + '</span> — ' + escapeHtml(r.flat) + phaseTag(r) + ' — ' + escapeHtml(r.contact) + '</div>' +
+      '<span class="reg-id">' + r.regId + '</span> — ' + escapeHtml(r.flat) + phaseTag(r) + towerTag(r) + ' — ' + escapeHtml(r.contact) + '</div>' +
       '<span class="pill pending">Pending</span></div>' +
       '<div class="reg-contact" style="margin-top:4px;">' + phoneLink(r.phone) + ' &middot; ₹' + r.total +
       (r.txnRef ? (' &middot; Ref: ' + escapeHtml(r.txnRef)) : '') + '</div>' +
@@ -714,7 +764,7 @@
       '</div>';
     return '<div class="reg-card">' +
       '<div class="reg-head"><div><span class="sno">' + (i+1) + '</span>' +
-      '<span class="reg-id">' + r.regId + '</span> — ' + escapeHtml(r.flat) + phaseTag(r) + ' — ' + escapeHtml(r.contact) + '</div>' +
+      '<span class="reg-id">' + r.regId + '</span> — ' + escapeHtml(r.flat) + phaseTag(r) + towerTag(r) + ' — ' + escapeHtml(r.contact) + '</div>' +
       '<span class="pill confirmed">Confirmed</span></div>' +
       '<div class="reg-contact" style="margin-top:4px;">' + phoneLink(r.phone) + ' &middot; ₹' + r.total +
       (r.confirmedBy ? (' &middot; Confirmed by ' + escapeHtml(r.confirmedBy)) : '') + '</div>' +
@@ -731,7 +781,7 @@
       '</div>';
     return '<div class="reg-card">' +
       '<div class="reg-head"><div><span class="sno">' + (i+1) + '</span>' +
-      '<span class="reg-id">' + r.regId + '</span> — ' + escapeHtml(r.flat) + phaseTag(r) + ' — ' + escapeHtml(r.contact) + '</div>' +
+      '<span class="reg-id">' + r.regId + '</span> — ' + escapeHtml(r.flat) + phaseTag(r) + towerTag(r) + ' — ' + escapeHtml(r.contact) + '</div>' +
       '<span class="pill rejected">Rejected</span></div>' +
       '<div class="reg-contact" style="margin-top:4px;">' + phoneLink(r.phone) + ' &middot; ₹' + r.total + '</div>' +
       '<div class="reg-people">Adults: ' + ((r.adults||[]).join(', ') || '—') + '<br>Kids: ' + ((r.kids||[]).join(', ') || '—') + '</div>' +
@@ -847,6 +897,7 @@
     document.getElementById('mStatus').innerText = match.status;
     document.getElementById('mFlat').value = match.flat || '';
     document.getElementById('mPhase').value = match.phase || 'PH1';
+    document.getElementById('mTower').value = match.tower || 'Tower A';
     document.getElementById('mContact').value = match.contact || '';
     document.getElementById('mPhone').value = match.phone || '';
     renderNameFields('mAdults', match.adults || [], 'Adult name');
@@ -890,6 +941,7 @@
       regId: MANAGED_REG.regId,
       flat: document.getElementById('mFlat').value.trim(),
       phase: document.getElementById('mPhase').value,
+      tower: document.getElementById('mTower').value,
       contact: document.getElementById('mContact').value.trim(),
       phone: document.getElementById('mPhone').value.trim(),
       adults: collectNames('mAdults'),
