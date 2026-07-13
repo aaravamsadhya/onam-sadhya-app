@@ -368,6 +368,27 @@ function buildWhatsAppLink(phone, message) {
   return 'https://wa.me/' + phone + '?text=' + encodeURIComponent(message);
 }
 
+// The WhatsApp message templates below spell out emoji as \u{...} escape sequences instead of
+// pasting the actual emoji characters into this file. Reason: this app gets deployed by copying
+// files through GitHub's web "edit file" text box, and that copy/paste path has repeatedly been
+// seen to mangle multi-byte emoji (each one turning into a single "?" replacement character) even
+// though the emoji were correct right here in the source. Escape sequences are plain ASCII, so
+// they survive that copy/paste step untouched and still produce the right emoji at runtime.
+const EMO = {
+  wheat: '\u{1F33E}',   // 🌾
+  hibiscus: '\u{1F33A}', // 🌺
+  curry: '\u{1F35B}',    // 🍛
+  blossom: '\u{1F33C}',  // 🌼
+  coconut: '\u{1F965}',  // 🥥
+  one: '1\u{FE0F}\u{20E3}',   // 1️⃣
+  two: '2\u{FE0F}\u{20E3}',   // 2️⃣
+  three: '3\u{FE0F}\u{20E3}', // 3️⃣
+  warn: '\u{26A0}\u{FE0F}',   // ⚠️
+  check: '\u{2705}',     // ✅
+  cherry: '\u{1F338}',   // 🌸
+  canoe: '\u{1F6F6}'     // 🛶
+};
+
 app.get('/api/admin/share-coupons', async (req, res) => {
   const access = requireWriteAccess(req.query.pin);
   if (!access.ok) return res.json({ success: false, message: access.message });
@@ -379,17 +400,17 @@ app.get('/api/admin/share-coupons', async (req, res) => {
     const coupons = await getCouponsForReg(regId, baseUrl(req));
     if (!coupons.length) return res.json({ success: false, message: 'No coupons generated yet' });
     const nameGreeting = coupons.map(c => c.name).join(' & ');
-    let msg = '🌾🌺 Onam Ashamsakal, ' + nameGreeting + '! 🌺🌾\n';
-    msg += 'As pookalams bloom and the Sadhya table fills with love, may this Onam bring your family joy, harmony, and abundance — just like the golden harvest it celebrates! 🍛🌼\n\n';
+    let msg = EMO.wheat + EMO.hibiscus + ' Onam Ashamsakal, ' + nameGreeting + '! ' + EMO.hibiscus + EMO.wheat + '\n';
+    msg += 'As pookalams bloom and the Sadhya table fills with love, may this Onam bring your family joy, harmony, and abundance — just like the golden harvest it celebrates! ' + EMO.curry + EMO.blossom + '\n\n';
     msg += 'Your Aaravam Sadhya entry coupons are ready:\n';
-    coupons.forEach((c, i) => { msg += (i + 1) + '. 🌼' + c.name + '🌼 (' + c.type + ')\n' + c.url + '\n'; });
-    msg += '\n🥥 Steps to follow (each person opens their own link):\n';
-    msg += '1️⃣ Open your respective coupon link\n';
-    msg += '2️⃣ Select your preferred entry slot to reserve your seat\n';
-    msg += '3️⃣ Download a copy of your coupon to your device (only after selecting the preferred slot) — this is mandatory and required for entry\n\n';
-    msg += 'Kindly complete this before slots fill up — Onam waits for no one! 😊\n\n';
-    msg += 'Onam Ashamsakal! 🌸\n';
-    msg += 'Team Aaravam 2026 🛶';
+    coupons.forEach((c, i) => { msg += (i + 1) + '. ' + EMO.blossom + c.name + EMO.blossom + ' (' + c.type + ')\n' + c.url + '\n'; });
+    msg += '\n' + EMO.coconut + ' Steps to follow (each person opens their own link):\n';
+    msg += EMO.one + ' Open your respective coupon link\n';
+    msg += EMO.two + ' Select your preferred entry slot to reserve your seat\n';
+    msg += EMO.three + ' Download a copy of your coupon to your device (only after selecting the preferred slot) — this is mandatory and required for entry\n\n';
+    msg += 'Kindly complete this before slots fill up — Onam waits for no one! \u{1F60A}\n\n';
+    msg += 'Onam Ashamsakal! ' + EMO.cherry + '\n';
+    msg += 'Team Aaravam 2026 ' + EMO.canoe;
     res.json({ success: true, waUrl: buildWhatsAppLink(reg.phone, msg), phone: reg.phone });
   } catch (err) {
     console.error(err);
@@ -407,19 +428,19 @@ app.get('/api/admin/share-reminder', async (req, res) => {
     const reg = regR.rows[0];
     const coupons = await getCouponsForReg(regId, baseUrl(req));
     if (!coupons.length) return res.json({ success: false, message: 'No coupons generated yet' });
-    let msg = '🌾🌺 Onam Ashamsakal! 🌺🌾\n';
-    msg += 'Just a friendly reminder to complete your Aaravam Sadhya entry formalities at the earliest! 🍛🌼\n\n';
+    let msg = EMO.wheat + EMO.hibiscus + ' Onam Ashamsakal! ' + EMO.hibiscus + EMO.wheat + '\n';
+    msg += 'Just a friendly reminder to complete your Aaravam Sadhya entry formalities at the earliest! ' + EMO.curry + EMO.blossom + '\n\n';
     coupons.forEach((c, i) => {
-      const status = c.slotNumber ? ('✅ Slot booked: Slot ' + c.slotNumber + ' - ' + c.slotTime) : '⚠️ No slot booked yet';
-      msg += (i + 1) + '. 🌼' + c.name + '🌼 (' + c.type + ') — ' + status + '\n' + c.url + '\n';
+      const status = c.slotNumber ? (EMO.check + ' Slot booked: Slot ' + c.slotNumber + ' - ' + c.slotTime) : (EMO.warn + ' No slot booked yet');
+      msg += (i + 1) + '. ' + EMO.blossom + c.name + EMO.blossom + ' (' + c.type + ') — ' + status + '\n' + c.url + '\n';
     });
-    msg += '\n🥥 Next steps:\n';
-    msg += '1️⃣ Open your coupon link\n';
-    msg += '2️⃣ Select your preferred entry slot to reserve your seat\n';
-    msg += '3️⃣ Download a copy of your coupon to your device (only after selecting the preferred slot) — this is mandatory and required for entry\n\n';
-    msg += 'Kindly complete this at the earliest to avoid last-minute hassle. 😊\n\n';
-    msg += 'Onam Ashamsakal! 🌸\n';
-    msg += 'Team Aaravam 2026 🛶';
+    msg += '\n' + EMO.coconut + ' Next steps:\n';
+    msg += EMO.one + ' Open your coupon link\n';
+    msg += EMO.two + ' Select your preferred entry slot to reserve your seat\n';
+    msg += EMO.three + ' Download a copy of your coupon to your device (only after selecting the preferred slot) — this is mandatory and required for entry\n\n';
+    msg += 'Kindly complete this at the earliest to avoid last-minute hassle. \u{1F60A}\n\n';
+    msg += 'Onam Ashamsakal! ' + EMO.cherry + '\n';
+    msg += 'Team Aaravam 2026 ' + EMO.canoe;
     res.json({ success: true, waUrl: buildWhatsAppLink(reg.phone, msg), phone: reg.phone });
   } catch (err) {
     console.error(err);
