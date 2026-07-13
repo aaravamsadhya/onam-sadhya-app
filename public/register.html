@@ -115,6 +115,7 @@
       <div id="upiQr"></div>
       <div class="upi-id" id="upiIdTxt"></div>
       <div class="center">Scan with any UPI app (GPay, PhonePe, Paytm) or pay to the ID above</div>
+      <div class="center" id="upiNoteHint" style="margin-top:6px;font-weight:600;color:#8a6d00;"></div>
     </div>
     <label>Transaction Reference / Last 4 digits (optional)</label>
     <input type="text" id="txnRef" placeholder="e.g. UPI Ref No.">
@@ -285,11 +286,22 @@
 
   function renderUpiQr(total){
     var holder = document.getElementById('upiQr');
+    var hint = document.getElementById('upiNoteHint');
     holder.innerHTML = '';
-    if (!cfg.upiId || total <= 0) { holder.innerHTML = '<div style="padding:20px;color:#888;font-size:12px;">Add family members to generate payment QR</div>'; return; }
+    if (!cfg.upiId || total <= 0) {
+      holder.innerHTML = '<div style="padding:20px;color:#888;font-size:12px;">Add family members to generate payment QR</div>';
+      hint.innerText = '';
+      return;
+    }
+    var note = paymentNote();
     var upiUri = 'upi://pay?pa=' + encodeURIComponent(cfg.upiId) + '&pn=' + encodeURIComponent(cfg.upiName) +
-      '&am=' + total + '&cu=INR&tn=' + encodeURIComponent(paymentNote());
+      '&am=' + total + '&cu=INR&tn=' + encodeURIComponent(note);
     new QRCode(holder, { text: upiUri, width: 150, height: 150, colorDark: '#064E38', colorLight: '#ffffff' });
+    // Many UPI apps (GPay/PhonePe especially) don't reliably show or prefill the note field
+    // encoded in the QR - it's an optional part of the UPI spec and support varies by app. So we
+    // also show it here as plain text the resident can type in manually if their app doesn't pick
+    // it up automatically, since this note is what the committee uses to reconcile payments.
+    hint.innerText = 'Payment note: ' + note + ' — if your UPI app doesn\'t fill this in automatically, please type it in as the remark/note.';
   }
 
   document.getElementById('paidCheck').addEventListener('change', updateTotal);
