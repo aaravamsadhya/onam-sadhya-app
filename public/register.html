@@ -19,6 +19,7 @@
   .card h2{margin:0 0 12px;font-size:17px;color:var(--leaf-dark);border-bottom:2px solid var(--gold);padding-bottom:6px;}
   label{display:block;font-size:13px;font-weight:600;margin:10px 0 4px;color:#555;}
   input[type=text],input[type=tel]{width:100%;padding:10px 12px;border:1.5px solid #ddd;border-radius:8px;font-size:15px;font-family:inherit;}
+  select#tower{width:100%;padding:10px 12px;border:1.5px solid #ddd;border-radius:8px;font-size:15px;font-family:inherit;background:#fff;color:#3a2a00;}
   button{cursor:pointer;border:none;border-radius:8px;font-family:inherit;font-weight:600;font-size:14px;padding:11px 18px;}
   .btn-primary{background:var(--leaf);color:#fff;width:100%;margin-top:14px;}
   .btn-primary:disabled{background:#bbb;cursor:not-allowed;}
@@ -70,14 +71,22 @@
   <div class="card" id="formCard">
     <h2>Register Your Family</h2>
 
-    <label class="required">Flat Number</label>
-    <input type="text" id="flat" placeholder="e.g. A-1203">
-
     <label class="required">Phase</label>
     <div class="phase-options">
-      <div class="phase-opt" id="phasePH1" onclick="selectPhase('PH1')">PH1</div>
-      <div class="phase-opt" id="phasePH2" onclick="selectPhase('PH2')">PH2</div>
+      <div class="phase-opt" id="phasePH1" onclick="selectPhase('PH1')">Phase 1</div>
+      <div class="phase-opt" id="phasePH2" onclick="selectPhase('PH2')">Phase 2</div>
     </div>
+
+    <label class="required">Tower</label>
+    <select id="tower" onchange="updateTotal()">
+      <option value="">Select your tower</option>
+      <option value="Tower A">Tower A</option>
+      <option value="Tower B">Tower B</option>
+      <option value="Tower C">Tower C</option>
+    </select>
+
+    <label class="required">Flat Number</label>
+    <input type="text" id="flat" placeholder="e.g. 412" oninput="updateTotal()">
 
     <label class="required">Your Name (Primary Contact)</label>
     <input type="text" id="contact" placeholder="e.g. Arjun Cheruvathari">
@@ -89,7 +98,8 @@
     <div id="adultsList"></div>
     <button type="button" class="btn-add" onclick="addPerson('adults')">+ Add Adult</button>
 
-    <label style="margin-top:16px;">Kids (₹<span class="kidPriceTxt">250</span> each)</label>
+    <label style="margin-top:16px;">Kids — age 8 or below only (₹<span class="kidPriceTxt">250</span> each)</label>
+    <div style="font-size:12px;color:#8a7a4d;margin:-2px 0 6px;">Kids above age 8 should be added under Adults instead.</div>
     <div id="kidsList"></div>
     <button type="button" class="btn-add" onclick="addPerson('kids')">+ Add Kid</button>
 
@@ -142,6 +152,7 @@
 <script>
   var adults = [''];
   var kids = [];
+  var kidAges = [];
   var phase = '';
   var cfg = { adultPrice: 450, kidPrice: 250, upiId: '', upiName: 'Aaravam Sadhya Committee' };
 
@@ -149,6 +160,7 @@
     phase = p;
     document.getElementById('phasePH1').classList.toggle('selected', p === 'PH1');
     document.getElementById('phasePH2').classList.toggle('selected', p === 'PH2');
+    updateTotal();
   }
 
   async function api(method, url, body){
@@ -170,15 +182,21 @@
   }
 
   function addPerson(kind){
-    (kind === 'adults' ? adults : kids).push('');
+    if(kind === 'adults'){ adults.push(''); }
+    else { kids.push(''); kidAges.push(''); }
     renderPeople();
   }
   function removePerson(kind, idx){
-    (kind === 'adults' ? adults : kids).splice(idx, 1);
+    if(kind === 'adults'){ adults.splice(idx, 1); }
+    else { kids.splice(idx, 1); kidAges.splice(idx, 1); }
     renderPeople();
   }
   function updateName(kind, idx, val){
     (kind === 'adults' ? adults : kids)[idx] = val;
+    updateTotal();
+  }
+  function updateKidAge(idx, val){
+    kidAges[idx] = val;
     updateTotal();
   }
 
@@ -189,16 +207,56 @@
   function renderList(kind, arr){
     var el = document.getElementById(kind + 'List');
     var html = '';
-    arr.forEach(function(name, i){
-      html += '<div class="person-row">' +
-        '<input type="text" placeholder="Full name" value="' + escapeHtml(name) + '" oninput="updateName(\'' + kind + '\',' + i + ',this.value)">' +
-        '<button type="button" class="btn-remove" onclick="removePerson(\'' + kind + '\',' + i + ')">&times;</button></div>';
-    });
+    if(kind === 'kids'){
+      arr.forEach(function(name, i){
+        html += '<div class="person-row">' +
+          '<input type="text" placeholder="Full name" value="' + escapeHtml(name) + '" oninput="updateName(\'kids\',' + i + ',this.value)">' +
+          '<input type="text" inputmode="numeric" placeholder="Age" maxlength="2" style="flex:0 0 60px;" value="' + escapeHtml(kidAges[i] || '') + '" oninput="this.value=this.value.replace(/\\D/g,\'\').slice(0,2);updateKidAge(' + i + ',this.value)">' +
+          '<button type="button" class="btn-remove" onclick="removePerson(\'kids\',' + i + ')">&times;</button></div>';
+      });
+    } else {
+      arr.forEach(function(name, i){
+        html += '<div class="person-row">' +
+          '<input type="text" placeholder="Full name" value="' + escapeHtml(name) + '" oninput="updateName(\'' + kind + '\',' + i + ',this.value)">' +
+          '<button type="button" class="btn-remove" onclick="removePerson(\'' + kind + '\',' + i + ')">&times;</button></div>';
+      });
+    }
     el.innerHTML = html;
+  }
+
+  // Only kids aged 8 or below qualify for the cheaper Kids coupon - anyone older needs to be
+  // added under Adults instead. This is a client-side eligibility gate at registration time.
+  function validateKidAges(){
+    var problems = [];
+    kids.forEach(function(name, i){
+      if(!name.trim()) return;
+      var raw = kidAges[i];
+      if(raw === undefined || raw === '' ){ problems.push(name + ': please enter an age'); return; }
+      var n = parseInt(raw, 10);
+      if(isNaN(n) || n < 0){ problems.push(name + ': enter a valid age'); return; }
+      if(n > 8){ problems.push(name + ' (age ' + n + ') is over 8 - please add as an Adult instead'); }
+    });
+    return problems;
   }
 
   function escapeHtml(s){
     return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  // The form itself now shows "Phase 1"/"Phase 2" on the buttons, so anywhere else a phase
+  // code gets displayed back to the resident (duplicate check, status check) should match that
+  // wording rather than showing the raw PH1/PH2 value they never actually saw as text.
+  function phaseLabel(p){
+    if(p === 'PH1') return 'Phase 1';
+    if(p === 'PH2') return 'Phase 2';
+    return p || '';
+  }
+
+  function locationSuffix(e){
+    var parts = [];
+    if(e.phase) parts.push(phaseLabel(e.phase));
+    if(e.tower) parts.push(e.tower);
+    return parts.length ? ' (' + parts.join(', ') + ')' : '';
   }
 
   function updateTotal(){
@@ -211,12 +269,26 @@
     renderUpiQr(total);
   }
 
+  // Builds the UPI payment note as "PH1 A 412" (Phase code + Tower letter + Flat number) so the
+  // committee can reconcile incoming payments against a registration just by reading the note in
+  // their bank/UPI app, without having to cross-check names or phone numbers.
+  function paymentNote(){
+    var flat = document.getElementById('flat').value.trim();
+    var towerVal = document.getElementById('tower').value;
+    var towerLetter = towerVal ? towerVal.replace('Tower ', '').trim() : '';
+    var parts = [];
+    if(phase) parts.push(phase);
+    if(towerLetter) parts.push(towerLetter);
+    if(flat) parts.push(flat);
+    return parts.length ? parts.join(' ') : 'Aaravam Sadhya 2026';
+  }
+
   function renderUpiQr(total){
     var holder = document.getElementById('upiQr');
     holder.innerHTML = '';
     if (!cfg.upiId || total <= 0) { holder.innerHTML = '<div style="padding:20px;color:#888;font-size:12px;">Add family members to generate payment QR</div>'; return; }
     var upiUri = 'upi://pay?pa=' + encodeURIComponent(cfg.upiId) + '&pn=' + encodeURIComponent(cfg.upiName) +
-      '&am=' + total + '&cu=INR&tn=' + encodeURIComponent('Aaravam Sadhya 2026');
+      '&am=' + total + '&cu=INR&tn=' + encodeURIComponent(paymentNote());
     new QRCode(holder, { text: upiUri, width: 150, height: 150, colorDark: '#064E38', colorLight: '#ffffff' });
   }
 
@@ -226,6 +298,7 @@
     return {
       flat: document.getElementById('flat').value.trim(),
       phase: phase,
+      tower: document.getElementById('tower').value,
       contact: document.getElementById('contact').value.trim(),
       phone: document.getElementById('phone').value,
       adults: adults.filter(function(n){ return n.trim(); }),
@@ -236,7 +309,7 @@
   }
 
   function clearFieldErrors(){
-    ['flat','contact','phone'].forEach(function(id){ document.getElementById(id).classList.remove('field-err'); });
+    ['flat','tower','contact','phone'].forEach(function(id){ document.getElementById(id).classList.remove('field-err'); });
     document.getElementById('phasePH1').classList.remove('field-err');
     document.getElementById('phasePH2').classList.remove('field-err');
   }
@@ -244,8 +317,9 @@
   function validateRequired(payload){
     clearFieldErrors();
     var missing = [];
-    if(!payload.flat){ missing.push('Flat Number'); document.getElementById('flat').classList.add('field-err'); }
     if(!payload.phase){ missing.push('Phase'); document.getElementById('phasePH1').classList.add('field-err'); document.getElementById('phasePH2').classList.add('field-err'); }
+    if(!payload.tower){ missing.push('Tower'); document.getElementById('tower').classList.add('field-err'); }
+    if(!payload.flat){ missing.push('Flat Number'); document.getElementById('flat').classList.add('field-err'); }
     if(!payload.contact){ missing.push('Your Name'); document.getElementById('contact').classList.add('field-err'); }
     if(!payload.phone || payload.phone.replace(/\D/g,'').length !== 10){ missing.push('WhatsApp Number (exactly 10 digits)'); document.getElementById('phone').classList.add('field-err'); }
     if(payload.adults.length === 0 && payload.kids.length === 0){ missing.push('At least one adult or kid'); }
@@ -259,6 +333,11 @@
     var missing = validateRequired(payload);
     if(missing.length){
       showMsg('Please fill in: ' + missing.join(', '), 'err');
+      return;
+    }
+    var ageProblems = validateKidAges();
+    if(ageProblems.length){
+      showMsg(ageProblems.join(' | '), 'err');
       return;
     }
     document.getElementById('submitBtn').disabled = true;
@@ -295,7 +374,7 @@
     existing.forEach(function(e){
       var people = e.adults.concat(e.kids).join(', ');
       html += '<div class="existing-reg"><b>' + e.regId + '</b> &middot; ' + escapeHtml(e.flat) +
-        (e.phase ? ' (' + e.phase + ')' : '') + ' &middot; <span class="status-pill ' +
+        locationSuffix(e) + ' &middot; <span class="status-pill ' +
         (e.status === 'Confirmed' ? 'confirmed' : 'pending') + '">' + e.status + '</span><br>' +
         escapeHtml(people) + ' &middot; ₹' + e.total + '</div>';
     });
@@ -351,7 +430,7 @@
       var pillClass = reg.status === 'Confirmed' ? 'confirmed' : 'pending';
       if(idx > 0) html += '<hr style="border:none;border-top:1px solid #eee;margin:14px 0;">';
       html += '<div><b>' + reg.regId + '</b> &middot; <span class="status-pill ' + pillClass + '">' + reg.status + '</span></div>' +
-        '<div style="margin-top:6px;font-size:13px;">' + escapeHtml(reg.flat || '') + (reg.phase ? ' (' + reg.phase + ')' : '') +
+        '<div style="margin-top:6px;font-size:13px;">' + escapeHtml(reg.flat || '') + locationSuffix(reg) +
         ' &middot; ₹' + reg.total + ' &middot; ' + reg.adultCount + ' adult(s), ' + reg.kidCount + ' kid(s)</div>';
       if(reg.status === 'Confirmed' && reg.coupons){
         html += '<div style="margin-top:10px;font-weight:700;font-size:13px;">Coupons:</div>';
