@@ -57,6 +57,7 @@ ALTER TABLE registrations ADD COLUMN IF NOT EXISTS phase TEXT NOT NULL DEFAULT '
 ALTER TABLE registrations ADD COLUMN IF NOT EXISTS rejected_reason TEXT;
 ALTER TABLE registrations ADD COLUMN IF NOT EXISTS rejected_by TEXT;
 ALTER TABLE registrations ADD COLUMN IF NOT EXISTS rejected_at TIMESTAMPTZ;
+ALTER TABLE registrations ADD COLUMN IF NOT EXISTS tower TEXT NOT NULL DEFAULT '';
 
 ALTER TABLE coupons ADD COLUMN IF NOT EXISTS slot_overridden BOOLEAN NOT NULL DEFAULT false;
 
@@ -66,6 +67,7 @@ CREATE TABLE IF NOT EXISTS deleted_registrations (
   reg_id TEXT NOT NULL,
   flat TEXT,
   phase TEXT,
+  tower TEXT,
   contact TEXT,
   phone TEXT,
   adult_names JSONB NOT NULL DEFAULT '[]',
@@ -79,6 +81,11 @@ CREATE TABLE IF NOT EXISTS deleted_registrations (
   deleted_by TEXT,
   deleted_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- The CREATE TABLE above already includes "tower" for brand-new databases, but that has no
+-- effect on a database that already had this table before tower existed - this ALTER covers
+-- those already-deployed apps so the column shows up either way.
+ALTER TABLE deleted_registrations ADD COLUMN IF NOT EXISTS tower TEXT;
 `;
 
 const DEFAULT_SLOTS = [
