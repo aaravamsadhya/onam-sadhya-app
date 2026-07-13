@@ -108,6 +108,10 @@ function pad3(n) {
   return String(n).padStart(3, '0');
 }
 
+// The set of valid towers, shared between new registrations and edits so both reject the same
+// way if someone tampers with the value client-side.
+const TOWER_OPTIONS = ['Tower A', 'Tower B', 'Tower C'];
+
 function baseUrl(req) {
   const proto = req.headers['x-forwarded-proto'] || req.protocol;
   return proto + '://' + req.get('host');
@@ -145,12 +149,12 @@ app.get('/api/config', (req, res) => {
 // ================= REGISTRATION =================
 async function existingRegistrationsForPhone(phone) {
   const r = await pool.query(
-    `SELECT reg_id, flat, phase, contact, adult_names, kid_names, total, status
+    `SELECT reg_id, flat, phase, tower, contact, adult_names, kid_names, total, status
      FROM registrations WHERE phone = $1 AND status != 'Rejected' ORDER BY id ASC`,
     [phone]
   );
   return r.rows.map(row => ({
-    regId: row.reg_id, flat: row.flat, phase: row.phase || '', contact: row.contact,
+    regId: row.reg_id, flat: row.flat, phase: row.phase || '', tower: row.tower || '', contact: row.contact,
     adults: row.adult_names || [], kids: row.kid_names || [],
     total: row.total, status: row.status
   }));
@@ -162,6 +166,7 @@ app.post('/api/register', async (req, res) => {
     const contact = (body.contact || '').trim();
     const flat = (body.flat || '').trim();
     const phase = (body.phase || '').trim().toUpperCase();
+    const tower = (body.tower || '').trim();
     const phone = normalizePhone(body.phone);
     const adults = (body.adults || []).map(n => (n || '').trim()).filter(Boolean);
     const kids = (body.kids || []).map(n => (n || '').trim()).filter(Boolean);
@@ -169,8 +174,9 @@ app.post('/api/register', async (req, res) => {
     const confirmDuplicate = !!body.confirmDuplicate;
 
     if (!contact) return res.json({ success: false, message: 'Please enter your name' });
+    if (phase !== 'PH1' && phase !== 'PH2') return res.json({ success: false, message: 'Please select a Phase' });
+    if (!TOWER_OPTIONS.includes(tower)) return res.json({ success: false, message: 'Please select a Tower' });
     if (!flat) return res.json({ success: false, message: 'Please enter your flat number' });
-    if (phase !== 'PH1' && phase !== 'PH2') return res.json({ success: false, message: 'Please select a Phase (PH1 or PH2)' });
     // normalizePhone only adds the 91 prefix when the raw input is exactly 10 digits, so any
     // valid number (10 digits, or already 12 with the 91 prefix) normalizes to exactly 12
     // characters. Anything else (too short OR too long, e.g. an accidental extra digit) is invalid.
@@ -189,9 +195,9 @@ app.post('/api/register', async (req, res) => {
     const regId = 'REG-' + pad3(id);
 
     await pool.query(
-      `INSERT INTO registrations (id, reg_id, flat, phase, contact, phone, adult_names, kid_names, adult_count, kid_count, total, txn_ref, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'Pending')`,
-      [id, regId, flat, phase, contact, phone, JSON.stringify(adults), JSON.stringify(kids), adults.length, kids.length, total, txnRef]
+      `INSERT INTO registrations (id, reg_id, flat, phase, tower, contact, phone, adult_names, kid_names, adult_count, kid_count, total, txn_ref, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'Pending')`,
+      [id, regId, flat, phase, tower, contact, phone, JSON.stringify(adults), JSON.stringify(kids), adults.length, kids.length, total, txnRef]
     );
 
     res.json({ success: true, regId, total });
@@ -216,7 +222,7 @@ app.post('/api/lookup', async (req, res) => {
     const registrations = [];
     for (const reg of r.rows) {
       const entry = {
-        regId: reg.reg_id, status: reg.status, flat: reg.flat, phase: reg.phase || '',
+        regId: reg.reg_id, status: reg.status, flat: reg.flat, phase: reg.phase || '', tower: reg.tower || '',
         total: reg.total, adultCount: reg.adult_count, kidCount: reg.kid_count
       };
       if (reg.status === 'Confirmed') {
@@ -284,7 +290,7 @@ app.get('/api/admin/registrations', async (req, res) => {
         kids = row.kid_names;
       }
       return {
-        regId: row.reg_id, flat: row.flat, phase: row.phase || '', contact: row.contact, phone: row.phone,
+        regId: row.reg_id, flat: row.flat, phase: row.phase || '', tower: row.tower || '', contact: row.contact, phone: row.phone,
         adults, kids,
         total: row.total, txnRef: row.txn_ref, status: row.status,
         submittedAt: row.submitted_at,
@@ -372,9 +378,18 @@ app.get('/api/admin/share-coupons', async (req, res) => {
     const reg = regR.rows[0];
     const coupons = await getCouponsForReg(regId, baseUrl(req));
     if (!coupons.length) return res.json({ success: false, message: 'No coupons generated yet' });
-    let msg = 'Happy Onam ' + reg.contact + '! Your Aaravam Sadhya coupons are ready:\n\n';
-    coupons.forEach(c => { msg += c.name + ' (' + c.type + '): ' + c.url + '\n'; });
-    msg += '\nOpen each link to view your coupon and pick your entry slot.';
+    const nameGreeting = coupons.map(c => c.name).join(' & ');
+    let msg = '🌾🌺 Onam Ashamsakal, ' + nameGreeting + '! 🌺🌾\n';
+    msg += 'As pookalams bloom and the Sadhya table fills with love, may this Onam bring your family joy, harmony, and abundance — just like the golden harvest it celebrates! 🍛🌼\n\n';
+    msg += 'Your Aaravam Sadhya entry coupons are ready:\n';
+    coupons.forEach((c, i) => { msg += (i + 1) + '. 🌼' + c.name + '🌼 (' + c.type + ')\n' + c.url + '\n'; });
+    msg += '\n🥥 Steps to follow (each person opens their own link):\n';
+    msg += '1️⃣ Open your respective coupon link\n';
+    msg += '2️⃣ Select your preferred entry slot to reserve your seat\n';
+    msg += '3️⃣ Download a copy of your coupon to your device (only after selecting the preferred slot) — this is mandatory and required for entry\n\n';
+    msg += 'Kindly complete this before slots fill up — Onam waits for no one! 😊\n\n';
+    msg += 'Onam Ashamsakal! 🌸\n';
+    msg += 'Team Aaravam 2026 🛶';
     res.json({ success: true, waUrl: buildWhatsAppLink(reg.phone, msg), phone: reg.phone });
   } catch (err) {
     console.error(err);
@@ -392,11 +407,19 @@ app.get('/api/admin/share-reminder', async (req, res) => {
     const reg = regR.rows[0];
     const coupons = await getCouponsForReg(regId, baseUrl(req));
     if (!coupons.length) return res.json({ success: false, message: 'No coupons generated yet' });
-    let msg = 'Good morning! It\'s Aaravam Sadhya day. Please pick your entry slot now:\n\n';
-    coupons.forEach(c => {
-      const status = c.slotNumber ? ('already booked Slot ' + c.slotNumber + ' - ' + c.slotTime) : 'not booked yet';
-      msg += c.name + ' (' + c.type + ') - ' + status + ': ' + c.url + '\n';
+    let msg = '🌾🌺 Onam Ashamsakal! 🌺🌾\n';
+    msg += 'Just a friendly reminder to complete your Aaravam Sadhya entry formalities at the earliest! 🍛🌼\n\n';
+    coupons.forEach((c, i) => {
+      const status = c.slotNumber ? ('✅ Slot booked: Slot ' + c.slotNumber + ' - ' + c.slotTime) : '⚠️ No slot booked yet';
+      msg += (i + 1) + '. 🌼' + c.name + '🌼 (' + c.type + ') — ' + status + '\n' + c.url + '\n';
     });
+    msg += '\n🥥 Next steps:\n';
+    msg += '1️⃣ Open your coupon link\n';
+    msg += '2️⃣ Select your preferred entry slot to reserve your seat\n';
+    msg += '3️⃣ Download a copy of your coupon to your device (only after selecting the preferred slot) — this is mandatory and required for entry\n\n';
+    msg += 'Kindly complete this at the earliest to avoid last-minute hassle. 😊\n\n';
+    msg += 'Onam Ashamsakal! 🌸\n';
+    msg += 'Team Aaravam 2026 🛶';
     res.json({ success: true, waUrl: buildWhatsAppLink(reg.phone, msg), phone: reg.phone });
   } catch (err) {
     console.error(err);
@@ -537,13 +560,15 @@ app.post('/api/admin/update-registration', async (req, res) => {
     const regId = body.regId;
     const flat = (body.flat || '').trim();
     const phase = (body.phase || '').trim().toUpperCase();
+    const tower = (body.tower || '').trim();
     const contact = (body.contact || '').trim();
     const phone = normalizePhone(body.phone);
     const newAdults = (body.adults || []).map(n => (n || '').trim()).filter(Boolean);
     const newKids = (body.kids || []).map(n => (n || '').trim()).filter(Boolean);
 
     if (!flat) { client.release(); return res.json({ success: false, message: 'Flat number is required' }); }
-    if (phase !== 'PH1' && phase !== 'PH2') { client.release(); return res.json({ success: false, message: 'Please select a Phase (PH1 or PH2)' }); }
+    if (phase !== 'PH1' && phase !== 'PH2') { client.release(); return res.json({ success: false, message: 'Please select a Phase' }); }
+    if (!TOWER_OPTIONS.includes(tower)) { client.release(); return res.json({ success: false, message: 'Please select a Tower' }); }
     if (!contact) { client.release(); return res.json({ success: false, message: 'Contact name is required' }); }
     if (phone.length !== 12) { client.release(); return res.json({ success: false, message: 'Please enter a valid 10-digit mobile number' }); }
     if (newAdults.length === 0 && newKids.length === 0) { client.release(); return res.json({ success: false, message: 'At least one adult or kid is required' }); }
@@ -613,8 +638,8 @@ app.post('/api/admin/update-registration', async (req, res) => {
     }
 
     await client.query(
-      `UPDATE registrations SET flat=$1, phase=$2, contact=$3, phone=$4, adult_names=$5, kid_names=$6, adult_count=$7, kid_count=$8, total=$9 WHERE reg_id=$10`,
-      [flat, phase, contact, phone, JSON.stringify(newAdults), JSON.stringify(newKids), adultCount, kidCount, total, regId]
+      `UPDATE registrations SET flat=$1, phase=$2, tower=$3, contact=$4, phone=$5, adult_names=$6, kid_names=$7, adult_count=$8, kid_count=$9, total=$10 WHERE reg_id=$11`,
+      [flat, phase, tower, contact, phone, JSON.stringify(newAdults), JSON.stringify(newKids), adultCount, kidCount, total, regId]
     );
 
     await client.query('COMMIT');
@@ -658,9 +683,9 @@ app.post('/api/admin/delete-registration', async (req, res) => {
     const delId = await nextSeqInClient(client, 'deleted_registrations_id_seq');
     await client.query(
       `INSERT INTO deleted_registrations
-       (id, reg_id, flat, phase, contact, phone, adult_names, kid_names, coupon_ids, was_confirmed, total, refund_amount, deleted_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-      [delId, reg.reg_id, reg.flat, reg.phase || '', reg.contact, reg.phone,
+       (id, reg_id, flat, phase, tower, contact, phone, adult_names, kid_names, coupon_ids, was_confirmed, total, refund_amount, deleted_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+      [delId, reg.reg_id, reg.flat, reg.phase || '', reg.tower || '', reg.contact, reg.phone,
         JSON.stringify(snapAdults), JSON.stringify(snapKids), JSON.stringify(couponIds),
         wasConfirmed, reg.total || 0, refundAmount, admin ? admin.name : 'Committee']
     );
@@ -715,7 +740,7 @@ app.get('/api/admin/deleted-registrations', async (req, res) => {
   try {
     const r = await pool.query('SELECT * FROM deleted_registrations ORDER BY deleted_at DESC');
     const deleted = r.rows.map(d => ({
-      id: d.id, regId: d.reg_id, flat: d.flat || '', phase: d.phase || '',
+      id: d.id, regId: d.reg_id, flat: d.flat || '', phase: d.phase || '', tower: d.tower || '',
       contact: d.contact || '', phone: d.phone || '',
       adults: d.adult_names || [], kids: d.kid_names || [], couponIds: d.coupon_ids || [],
       wasConfirmed: d.was_confirmed, total: d.total, refundAmount: d.refund_amount,
@@ -847,23 +872,35 @@ app.get('/api/admin/dashboard', async (req, res) => {
 });
 
 // ================= EXPORT (Excel report) =================
+// Every timestamp in the app is stored in the database as TIMESTAMPTZ (a precise UTC instant,
+// which is correct), but formatting it with plain .toLocaleString('en-IN') only controls the
+// *style* of the output (day/month/year order, comma placement) - it silently reads the clock
+// in whichever timezone the server happens to be running in, which on Railway is UTC, not IST.
+// That's why a check-in at 12:10 AM IST was showing up as roughly 6:40 PM the previous day.
+// Passing timeZone explicitly fixes this regardless of where the server itself is hosted.
+function fmtIST(ts) {
+  if (!ts) return '';
+  return new Date(ts).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+}
+
 // For Confirmed registrations, adultNames/kidNames should be pre-derived from the live active
 // coupons (see caller), so the report always matches the admin console rather than a stored
 // name array that could have drifted from a direct database edit.
 function regRow(r, adultNames, kidNames) {
   return {
-    reg_id: r.reg_id, flat: r.flat, phase: r.phase || '', contact: r.contact, phone: r.phone,
+    reg_id: r.reg_id, flat: r.flat, phase: r.phase || '', tower: r.tower || '', contact: r.contact, phone: r.phone,
     adults: adultNames.join(', '), kids: kidNames.join(', '),
     adult_count: adultNames.length, kid_count: kidNames.length, total: r.total,
     txn_ref: r.txn_ref || '', status: r.status,
-    submitted_at: r.submitted_at ? new Date(r.submitted_at).toLocaleString('en-IN') : '',
+    submitted_at: fmtIST(r.submitted_at),
     confirmed_by: r.confirmed_by || '',
-    confirmed_at: r.confirmed_at ? new Date(r.confirmed_at).toLocaleString('en-IN') : ''
+    confirmed_at: fmtIST(r.confirmed_at)
   };
 }
 
 const REG_COLUMNS = [
   { header: 'Reg ID', key: 'reg_id', width: 12 },
+  { header: 'Tower', key: 'tower', width: 12 },
   { header: 'Flat', key: 'flat', width: 12 },
   { header: 'Phase', key: 'phase', width: 10 },
   { header: 'Contact Name', key: 'contact', width: 22 },
@@ -922,7 +959,7 @@ app.get('/api/admin/export', async (req, res) => {
     const wsSum = wb.addWorksheet('Summary');
     wsSum.columns = [{ key: 'label', width: 32 }, { key: 'value', width: 20 }];
     const summaryData = [
-      ['Report generated at', new Date().toLocaleString('en-IN')],
+      ['Report generated at', fmtIST(new Date())],
       ['', ''],
       ['Total registrations (families)', regs.rows.length],
       ['  - Pending payment', pendingRows.length],
@@ -948,19 +985,20 @@ app.get('/api/admin/export', async (req, res) => {
     wsPending.columns = REG_COLUMNS;
     pendingRows.forEach(r => wsPending.addRow(regRow(r, r.adult_names || [], r.kid_names || [])));
     wsPending.getRow(1).font = { bold: true };
-    wsPending.autoFilter = { from: 'A1', to: 'O1' };
+    wsPending.autoFilter = { from: 'A1', to: 'P1' };
 
     // -------- Confirmed Registrations --------
     const wsConfirmed = wb.addWorksheet('Confirmed Registrations');
     wsConfirmed.columns = REG_COLUMNS;
     confirmedRows.forEach(r => wsConfirmed.addRow(regRow(r, namesFor(r.reg_id, 'Adult'), namesFor(r.reg_id, 'Kid'))));
     wsConfirmed.getRow(1).font = { bold: true };
-    wsConfirmed.autoFilter = { from: 'A1', to: 'O1' };
+    wsConfirmed.autoFilter = { from: 'A1', to: 'P1' };
 
     // -------- Rejected Registrations --------
     const wsRejected = wb.addWorksheet('Rejected Registrations');
     wsRejected.columns = [
       { header: 'Reg ID', key: 'reg_id', width: 12 },
+      { header: 'Tower', key: 'tower', width: 12 },
       { header: 'Flat', key: 'flat', width: 12 },
       { header: 'Phase', key: 'phase', width: 10 },
       { header: 'Contact Name', key: 'contact', width: 22 },
@@ -974,14 +1012,14 @@ app.get('/api/admin/export', async (req, res) => {
     ];
     rejectedRows.forEach(r => {
       wsRejected.addRow({
-        reg_id: r.reg_id, flat: r.flat, phase: r.phase || '', contact: r.contact, phone: r.phone,
+        reg_id: r.reg_id, flat: r.flat, phase: r.phase || '', tower: r.tower || '', contact: r.contact, phone: r.phone,
         adults: (r.adult_names || []).join(', '), kids: (r.kid_names || []).join(', '), total: r.total,
         reason: r.rejected_reason || '', rejected_by: r.rejected_by || '',
-        rejected_at: r.rejected_at ? new Date(r.rejected_at).toLocaleString('en-IN') : ''
+        rejected_at: fmtIST(r.rejected_at)
       });
     });
     wsRejected.getRow(1).font = { bold: true };
-    wsRejected.autoFilter = { from: 'A1', to: 'K1' };
+    wsRejected.autoFilter = { from: 'A1', to: 'L1' };
 
     // -------- Coupon Details (one row per person) --------
     const wsCoupons = wb.addWorksheet('Coupon Details');
@@ -1006,8 +1044,8 @@ app.get('/api/admin/export', async (req, res) => {
         active: c.active ? 'Active' : 'Disabled',
         slot_number: c.slot_number || '', slot_time: c.slot_time || '',
         checked_in: c.checked_in ? 'Yes' : 'No',
-        checked_in_at: c.checked_in_at ? new Date(c.checked_in_at).toLocaleString('en-IN') : '',
-        generated_at: c.generated_at ? new Date(c.generated_at).toLocaleString('en-IN') : ''
+        checked_in_at: fmtIST(c.checked_in_at),
+        generated_at: fmtIST(c.generated_at)
       });
     });
     wsCoupons.getRow(1).font = { bold: true };
@@ -1188,7 +1226,7 @@ app.post('/api/scan/family', async (req, res) => {
     const cR = await pool.query('SELECT * FROM coupons WHERE token=$1', [token]);
     if (!cR.rows.length) return res.json({ found: false, message: 'Coupon not recognized' });
     const regId = cR.rows[0].reg_id;
-    const regR = await pool.query('SELECT flat, contact, phase, phone FROM registrations WHERE reg_id=$1', [regId]);
+    const regR = await pool.query('SELECT flat, contact, phase, tower, phone FROM registrations WHERE reg_id=$1', [regId]);
     const phone = regR.rows[0] ? regR.rows[0].phone : cR.rows[0].phone;
 
     // A family may have registered more than once under the same phone number (e.g. they used
@@ -1196,7 +1234,7 @@ app.post('/api/scan/family', async (req, res) => {
     // that phone number so group check-in covers ALL of their coupons at once, not just the
     // one registration the scanned coupon happens to belong to.
     const siblingRegsR = await pool.query(
-      `SELECT reg_id, flat, contact, phase FROM registrations WHERE phone=$1 AND status != 'Rejected' ORDER BY id ASC`,
+      `SELECT reg_id, flat, contact, phase, tower FROM registrations WHERE phone=$1 AND status != 'Rejected' ORDER BY id ASC`,
       [phone]
     );
     const regIds = siblingRegsR.rows.map(r => r.reg_id);
@@ -1221,6 +1259,7 @@ app.post('/api/scan/family', async (req, res) => {
       flat: primary.flat || '',
       contact: primary.contact || '',
       phase: primary.phase || '',
+      tower: primary.tower || '',
       regCount: regIds.length,
       members
     });
