@@ -19,7 +19,6 @@
   .card h2{margin:0 0 12px;font-size:17px;color:var(--leaf-dark);border-bottom:2px solid var(--gold);padding-bottom:6px;}
   label{display:block;font-size:13px;font-weight:600;margin:10px 0 4px;color:#555;}
   input[type=text],input[type=tel]{width:100%;padding:10px 12px;border:1.5px solid #ddd;border-radius:8px;font-size:15px;font-family:inherit;}
-  select#tower{width:100%;padding:10px 12px;border:1.5px solid #ddd;border-radius:8px;font-size:15px;font-family:inherit;background:#fff;color:#3a2a00;}
   button{cursor:pointer;border:none;border-radius:8px;font-family:inherit;font-weight:600;font-size:14px;padding:11px 18px;}
   .btn-primary{background:var(--leaf);color:#fff;width:100%;margin-top:14px;}
   .btn-primary:disabled{background:#bbb;cursor:not-allowed;}
@@ -50,6 +49,9 @@
   .phase-options{display:flex;gap:10px;margin-top:4px;}
   .phase-opt{flex:1;border:1.5px solid #ddd;border-radius:8px;padding:10px;text-align:center;cursor:pointer;font-weight:700;color:#555;}
   .phase-opt.selected{border-color:var(--leaf);background:#E6F4EA;color:var(--leaf-dark);}
+  .tower-options{display:flex;gap:10px;margin-top:4px;}
+  .tower-opt{flex:1;border:1.5px solid #ddd;border-radius:8px;padding:10px;text-align:center;cursor:pointer;font-weight:700;color:#555;}
+  .tower-opt.selected{border-color:var(--leaf);background:#E6F4EA;color:var(--leaf-dark);}
   .field-err{border-color:var(--maroon) !important;}
   .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;padding:16px;z-index:50;}
   .modal-box{background:#fff;border-radius:14px;padding:20px;max-width:440px;width:100%;max-height:80vh;overflow:auto;}
@@ -78,12 +80,11 @@
     </div>
 
     <label class="required">Tower</label>
-    <select id="tower" onchange="updateTotal()">
-      <option value="">Select your tower</option>
-      <option value="Tower A">Tower A</option>
-      <option value="Tower B">Tower B</option>
-      <option value="Tower C">Tower C</option>
-    </select>
+    <div class="tower-options">
+      <div class="tower-opt" id="towerA" onclick="selectTower('Tower A')">Tower A</div>
+      <div class="tower-opt" id="towerB" onclick="selectTower('Tower B')">Tower B</div>
+      <div class="tower-opt" id="towerC" onclick="selectTower('Tower C')">Tower C</div>
+    </div>
 
     <label class="required">Flat Number</label>
     <input type="text" id="flat" placeholder="e.g. 412" oninput="updateTotal()">
@@ -98,8 +99,8 @@
     <div id="adultsList"></div>
     <button type="button" class="btn-add" onclick="addPerson('adults')">+ Add Adult</button>
 
-    <label style="margin-top:16px;">Kids — age 8 or below only (₹<span class="kidPriceTxt">250</span> each)</label>
-    <div style="font-size:12px;color:#8a7a4d;margin:-2px 0 6px;">Kids above age 8 should be added under Adults instead.</div>
+    <label style="margin-top:16px;">Kids — age 10 or below only (₹<span class="kidPriceTxt">250</span> each)</label>
+    <div style="font-size:12px;color:#8a7a4d;margin:-2px 0 6px;">Kids above age 10 should be added under Adults.</div>
     <div id="kidsList"></div>
     <button type="button" class="btn-add" onclick="addPerson('kids')">+ Add Kid</button>
 
@@ -115,7 +116,7 @@
       <div id="upiQr"></div>
       <div class="upi-id" id="upiIdTxt"></div>
       <div class="center">Scan with any UPI app (GPay, PhonePe, Paytm) or pay to the ID above</div>
-      <div class="center" id="upiNoteHint" style="margin-top:6px;font-weight:600;color:#8a6d00;"></div>
+      <div class="center" id="upiNoteHint" style="margin-top:8px;font-weight:700;color:#8E1B1B;background:#FFF3CD;border:1.5px solid #F5B70A;border-radius:8px;padding:8px 10px;"></div>
     </div>
     <label>Transaction Reference / Last 4 digits (optional)</label>
     <input type="text" id="txnRef" placeholder="e.g. UPI Ref No.">
@@ -123,7 +124,10 @@
       <input type="checkbox" id="paidCheck">
       <label for="paidCheck" style="margin:0;">I have completed the payment for the amount shown above</label>
     </div>
-    <button class="btn-primary" id="submitBtn" disabled onclick="submitForm()">Submit Registration</button>
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button class="btn-primary" id="submitBtn" disabled onclick="submitForm()" style="margin-top:0;flex:1;">Submit Registration</button>
+      <button class="btn-secondary" type="button" onclick="resetForm()" style="flex:0 0 auto;">Reset</button>
+    </div>
     <div class="msg" id="formMsg"></div>
   </div>
 
@@ -155,12 +159,21 @@
   var kids = [];
   var kidAges = [];
   var phase = '';
+  var tower = '';
   var cfg = { adultPrice: 450, kidPrice: 250, upiId: '', upiName: 'Aaravam Sadhya Committee' };
 
   function selectPhase(p){
     phase = p;
     document.getElementById('phasePH1').classList.toggle('selected', p === 'PH1');
     document.getElementById('phasePH2').classList.toggle('selected', p === 'PH2');
+    updateTotal();
+  }
+
+  function selectTower(t){
+    tower = t;
+    document.getElementById('towerA').classList.toggle('selected', t === 'Tower A');
+    document.getElementById('towerB').classList.toggle('selected', t === 'Tower B');
+    document.getElementById('towerC').classList.toggle('selected', t === 'Tower C');
     updateTotal();
   }
 
@@ -225,7 +238,7 @@
     el.innerHTML = html;
   }
 
-  // Only kids aged 8 or below qualify for the cheaper Kids coupon - anyone older needs to be
+  // Only kids aged 10 or below qualify for the cheaper Kids coupon - anyone older needs to be
   // added under Adults instead. This is a client-side eligibility gate at registration time.
   function validateKidAges(){
     var problems = [];
@@ -235,7 +248,7 @@
       if(raw === undefined || raw === '' ){ problems.push(name + ': please enter an age'); return; }
       var n = parseInt(raw, 10);
       if(isNaN(n) || n < 0){ problems.push(name + ': enter a valid age'); return; }
-      if(n > 8){ problems.push(name + ' (age ' + n + ') is over 8 - please add as an Adult instead'); }
+      if(n > 10){ problems.push(name + ' (age ' + n + ') is over 10 - please add as an Adult instead'); }
     });
     return problems;
   }
@@ -275,8 +288,7 @@
   // their bank/UPI app, without having to cross-check names or phone numbers.
   function paymentNote(){
     var flat = document.getElementById('flat').value.trim();
-    var towerVal = document.getElementById('tower').value;
-    var towerLetter = towerVal ? towerVal.replace('Tower ', '').trim() : '';
+    var towerLetter = tower ? tower.replace('Tower ', '').trim() : '';
     var parts = [];
     if(phase) parts.push(phase);
     if(towerLetter) parts.push(towerLetter);
@@ -310,7 +322,7 @@
     return {
       flat: document.getElementById('flat').value.trim(),
       phase: phase,
-      tower: document.getElementById('tower').value,
+      tower: tower,
       contact: document.getElementById('contact').value.trim(),
       phone: document.getElementById('phone').value,
       adults: adults.filter(function(n){ return n.trim(); }),
@@ -321,21 +333,56 @@
   }
 
   function clearFieldErrors(){
-    ['flat','tower','contact','phone'].forEach(function(id){ document.getElementById(id).classList.remove('field-err'); });
+    ['flat','contact','phone'].forEach(function(id){ document.getElementById(id).classList.remove('field-err'); });
     document.getElementById('phasePH1').classList.remove('field-err');
     document.getElementById('phasePH2').classList.remove('field-err');
+    document.getElementById('towerA').classList.remove('field-err');
+    document.getElementById('towerB').classList.remove('field-err');
+    document.getElementById('towerC').classList.remove('field-err');
   }
 
   function validateRequired(payload){
     clearFieldErrors();
     var missing = [];
     if(!payload.phase){ missing.push('Phase'); document.getElementById('phasePH1').classList.add('field-err'); document.getElementById('phasePH2').classList.add('field-err'); }
-    if(!payload.tower){ missing.push('Tower'); document.getElementById('tower').classList.add('field-err'); }
+    if(!payload.tower){
+      missing.push('Tower');
+      document.getElementById('towerA').classList.add('field-err');
+      document.getElementById('towerB').classList.add('field-err');
+      document.getElementById('towerC').classList.add('field-err');
+    }
     if(!payload.flat){ missing.push('Flat Number'); document.getElementById('flat').classList.add('field-err'); }
     if(!payload.contact){ missing.push('Your Name'); document.getElementById('contact').classList.add('field-err'); }
     if(!payload.phone || payload.phone.replace(/\D/g,'').length !== 10){ missing.push('WhatsApp Number (exactly 10 digits)'); document.getElementById('phone').classList.add('field-err'); }
     if(payload.adults.length === 0 && payload.kids.length === 0){ missing.push('At least one adult or kid'); }
     return missing;
+  }
+
+  // Clears every field back to a blank form. Only reachable from the Reset button, which lives
+  // inside formCard/payCard - once a registration is actually submitted, finishRegistration()
+  // replaces that markup with a static "Registered!" message, so this button (and this function)
+  // is no longer reachable at that point. That naturally limits Reset to pre-submission use.
+  function resetForm(){
+    adults = [''];
+    kids = [];
+    kidAges = [];
+    phase = '';
+    tower = '';
+    document.getElementById('phasePH1').classList.remove('selected');
+    document.getElementById('phasePH2').classList.remove('selected');
+    document.getElementById('towerA').classList.remove('selected');
+    document.getElementById('towerB').classList.remove('selected');
+    document.getElementById('towerC').classList.remove('selected');
+    document.getElementById('flat').value = '';
+    document.getElementById('contact').value = '';
+    document.getElementById('phone').value = '';
+    document.getElementById('txnRef').value = '';
+    document.getElementById('paidCheck').checked = false;
+    clearFieldErrors();
+    document.getElementById('formMsg').className = 'msg';
+    document.getElementById('formMsg').innerText = '';
+    renderPeople();
+    updateTotal();
   }
 
   var pendingPayload = null;
@@ -373,10 +420,18 @@
     }
   }
 
+  // Reloads the page fresh - the simplest reliable way back to a blank registration form,
+  // whether the resident is looking at the "Registered!" confirmation or at a status-check
+  // result, both of which replace/append to markup that can't otherwise be undone in place.
+  function goHome(){
+    location.reload();
+  }
+
   function finishRegistration(payload, res){
     document.getElementById('formCard').innerHTML = '<h2>Registered!</h2>' +
       '<p>Thanks, ' + escapeHtml(payload.contact) + '! Your registration <b>' + res.regId + '</b> for ₹' + res.total + ' has been received.</p>' +
-      '<p>The Sadhya committee will verify your payment and send your individual coupons to this WhatsApp number shortly.</p>';
+      '<p>The Sadhya committee will verify your payment and send your individual coupons to this WhatsApp number shortly.</p>' +
+      '<button class="btn-secondary" style="width:100%;margin-top:14px;" onclick="goHome()">🏠 Back to Home</button>';
     document.getElementById('payCard').classList.add('hidden');
   }
 
@@ -434,7 +489,8 @@
     var res = await api('POST', '/api/lookup', { phone: phone });
     var el = document.getElementById('statusResult');
     if(!res.found){
-      el.innerHTML = '<div class="center">No registration found for this number.</div>';
+      el.innerHTML = '<div class="center">No registration found for this number.</div>' +
+        '<button class="btn-secondary" style="width:100%;margin-top:14px;" onclick="goHome()">🏠 Back to Home</button>';
       return;
     }
     var html = '';
@@ -457,6 +513,7 @@
     if(res.registrations.length > 1){
       html = '<div style="margin-bottom:10px;font-size:12px;color:#888;">This number has ' + res.registrations.length + ' registrations:</div>' + html;
     }
+    html += '<button class="btn-secondary" style="width:100%;margin-top:14px;" onclick="goHome()">🏠 Back to Home</button>';
     el.innerHTML = html;
   }
 

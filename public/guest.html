@@ -93,7 +93,7 @@
         <div class="coupon-bottom"></div>
       </div>
       <div class="dl-row hidden" id="dlRow">
-        <p class="dl-hint">Save a copy to your phone now, in case the app is unreachable on the day.</p>
+        <p class="dl-hint">Please save a copy to your phone for easy access on the day.</p>
         <button class="btn-dl" onclick="downloadCouponPNG()">📥 Save as Image</button>
         <button class="btn-dl btn-dl-alt" onclick="downloadCouponPDF()">📄 Save as PDF</button>
         <div class="dl-status" id="dlStatus"></div>
@@ -125,7 +125,6 @@
     var badge = el('slotBadge');
     badge.style.background = slotColor(num);
     badge.style.color = slotTextColor(num);
-    el('slotColorNote').innerText = 'Show this colour at the gate for a quick, no-scan check.';
   }
 
   // The QR is now rendered server-side and handed over as a plain PNG (see qr field on the
