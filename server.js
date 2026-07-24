@@ -180,7 +180,7 @@ app.post('/api/register', async (req, res) => {
     // normalizePhone only adds the 91 prefix when the raw input is exactly 10 digits, so any
     // valid number (10 digits, or already 12 with the 91 prefix) normalizes to exactly 12
     // characters. Anything else (too short OR too long, e.g. an accidental extra digit) is invalid.
-    if (phone.length !== 12) return res.json({ success: false, message: 'Please enter a valid 10-digit mobile number' });
+    if (!/^91[6-9]\d{9}$/.test(phone)) return res.json({ success: false, message: 'Please enter a valid 10-digit mobile number (starting 6-9)' });
     if (adults.length === 0 && kids.length === 0) return res.json({ success: false, message: 'Please add at least one adult or kid' });
 
     if (!confirmDuplicate) {
@@ -584,7 +584,7 @@ app.post('/api/admin/update-registration', async (req, res) => {
     if (phase !== 'PH1' && phase !== 'PH2') { client.release(); return res.json({ success: false, message: 'Please select a Phase' }); }
     if (!TOWER_OPTIONS.includes(tower)) { client.release(); return res.json({ success: false, message: 'Please select a Tower' }); }
     if (!contact) { client.release(); return res.json({ success: false, message: 'Contact name is required' }); }
-    if (phone.length !== 12) { client.release(); return res.json({ success: false, message: 'Please enter a valid 10-digit mobile number' }); }
+    if (!/^91[6-9]\d{9}$/.test(phone)) { client.release(); return res.json({ success: false, message: 'Please enter a valid 10-digit mobile number (starting 6-9)' }); }
     if (newAdults.length === 0 && newKids.length === 0) { client.release(); return res.json({ success: false, message: 'At least one adult or kid is required' }); }
 
     await client.query('BEGIN');
