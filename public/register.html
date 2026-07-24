@@ -35,6 +35,9 @@
   .total-box .amt{font-size:28px;font-weight:800;color:var(--maroon);}
   .total-box .brk{font-size:12px;color:#5a3d00;margin-top:2px;}
   .upi-box{text-align:center;margin-top:14px;}
+  .btn-upi-app{display:block;background:linear-gradient(90deg,var(--leaf-dark),var(--leaf));color:#fff;text-decoration:none;text-align:center;padding:13px 16px;border-radius:10px;font-weight:700;font-size:15px;margin-bottom:12px;}
+  .upi-divider{display:flex;align-items:center;gap:10px;color:#999;font-size:12px;margin:12px 0;}
+  .upi-divider::before,.upi-divider::after{content:'';flex:1;height:1px;background:#e5ddc0;}
   #upiQr{display:inline-block;background:#fff;padding:8px;border-radius:10px;border:2px dashed var(--gold-dark);}
   .upi-id{font-weight:700;font-size:15px;margin-top:8px;color:var(--leaf-dark);word-break:break-all;}
   .checkline{display:flex;align-items:flex-start;gap:8px;margin-top:14px;font-size:13px;}
@@ -93,7 +96,11 @@
     <input type="text" id="contact" placeholder="e.g. Arjun Cheruvathari">
 
     <label class="required">Your WhatsApp Number</label>
-    <input type="tel" id="phone" placeholder="10-digit mobile number" maxlength="10" oninput="this.value=this.value.replace(/\D/g,'').slice(0,10)">
+    <input type="tel" id="phone" placeholder="10-digit mobile number" maxlength="10" oninput="this.value=this.value.replace(/\D/g,'').slice(0,10);checkPhoneMatch()">
+
+    <label class="required">Re-enter WhatsApp Number</label>
+    <input type="tel" id="phoneConfirm" placeholder="Type it again" maxlength="10" oninput="this.value=this.value.replace(/\D/g,'').slice(0,10);checkPhoneMatch()" onpaste="return false;">
+    <div id="phoneMatchMsg" style="font-size:12px;margin-top:-6px;margin-bottom:6px;"></div>
 
     <label style="margin-top:16px;">Adults (₹<span class="adultPriceTxt">450</span> each)</label>
     <div id="adultsList"></div>
@@ -113,6 +120,8 @@
   <div class="card" id="payCard">
     <h2>Make Payment</h2>
     <div class="upi-box">
+      <a href="#" id="upiAppBtn" class="btn-upi-app hidden">Pay ₹<span id="upiAppAmt">0</span> via UPI App</a>
+      <div class="upi-divider" id="upiDivider" style="display:none;">or scan / pay manually</div>
       <div id="upiQr"></div>
       <div class="upi-id" id="upiIdTxt"></div>
       <div class="center">Scan with any UPI app (GPay, PhonePe, Paytm) or pay to the ID above</div>
@@ -296,19 +305,38 @@
     return parts.length ? parts.join(' ') : 'Aaravam Sadhya 2026';
   }
 
+  // Phones (not laptops/desktops) have a UPI app registered to handle upi:// links, so the
+  // "Pay via UPI App" shortcut only makes sense there - on a laptop tapping it would just fail
+  // silently or show a browser error, so we detect and hide it there, leaving the QR + UPI ID
+  // (which work fine on any device) as the only path for laptop users, per Arjun's request.
+  var IS_MOBILE = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
   function renderUpiQr(total){
     var holder = document.getElementById('upiQr');
     var hint = document.getElementById('upiNoteHint');
+    var appBtn = document.getElementById('upiAppBtn');
+    var divider = document.getElementById('upiDivider');
     holder.innerHTML = '';
     if (!cfg.upiId || total <= 0) {
       holder.innerHTML = '<div style="padding:20px;color:#888;font-size:12px;">Add family members to generate payment QR</div>';
       hint.innerText = '';
+      appBtn.classList.add('hidden');
+      divider.style.display = 'none';
       return;
     }
     var note = paymentNote();
     var upiUri = 'upi://pay?pa=' + encodeURIComponent(cfg.upiId) + '&pn=' + encodeURIComponent(cfg.upiName) +
       '&am=' + total + '&cu=INR&tn=' + encodeURIComponent(note);
     new QRCode(holder, { text: upiUri, width: 150, height: 150, colorDark: '#064E38', colorLight: '#ffffff' });
+    if (IS_MOBILE) {
+      appBtn.href = upiUri;
+      document.getElementById('upiAppAmt').innerText = total;
+      appBtn.classList.remove('hidden');
+      divider.style.display = 'flex';
+    } else {
+      appBtn.classList.add('hidden');
+      divider.style.display = 'none';
+    }
     // Many UPI apps (GPay/PhonePe especially) don't reliably show or prefill the note field
     // encoded in the QR - it's an optional part of the UPI spec and support varies by app. So we
     // also show it here as plain text the resident can type in manually if their app doesn't pick
@@ -333,12 +361,26 @@
   }
 
   function clearFieldErrors(){
-    ['flat','contact','phone'].forEach(function(id){ document.getElementById(id).classList.remove('field-err'); });
+    ['flat','contact','phone','phoneConfirm'].forEach(function(id){ document.getElementById(id).classList.remove('field-err'); });
     document.getElementById('phasePH1').classList.remove('field-err');
     document.getElementById('phasePH2').classList.remove('field-err');
     document.getElementById('towerA').classList.remove('field-err');
     document.getElementById('towerB').classList.remove('field-err');
     document.getElementById('towerC').classList.remove('field-err');
+  }
+
+  // Live feedback as the resident retypes their number into the confirm field - this is a
+  // typo-catcher, not a real "is this a WhatsApp number" check (the app has no way to verify
+  // that without a paid SMS/WhatsApp API). Paste is blocked on the confirm field (see its
+  // onpaste handler) specifically so this catches genuine retyping mistakes rather than someone
+  // pasting the same wrong number into both fields.
+  function checkPhoneMatch(){
+    var phone = document.getElementById('phone').value;
+    var confirm = document.getElementById('phoneConfirm').value;
+    var msg = document.getElementById('phoneMatchMsg');
+    if(!confirm){ msg.innerText = ''; return; }
+    if(phone === confirm){ msg.style.color = '#0B6E4F'; msg.innerText = '✓ Numbers match'; }
+    else { msg.style.color = '#8E1B1B'; msg.innerText = '✗ Doesn\'t match'; }
   }
 
   function validateRequired(payload){
@@ -353,7 +395,15 @@
     }
     if(!payload.flat){ missing.push('Flat Number'); document.getElementById('flat').classList.add('field-err'); }
     if(!payload.contact){ missing.push('Your Name'); document.getElementById('contact').classList.add('field-err'); }
-    if(!payload.phone || payload.phone.replace(/\D/g,'').length !== 10){ missing.push('WhatsApp Number (exactly 10 digits)'); document.getElementById('phone').classList.add('field-err'); }
+    var phoneConfirm = document.getElementById('phoneConfirm').value;
+    if(!payload.phone || !/^[6-9]\d{9}$/.test(payload.phone.replace(/\D/g,''))){
+      missing.push('WhatsApp Number (valid 10-digit mobile number, starting 6-9)');
+      document.getElementById('phone').classList.add('field-err');
+    } else if(payload.phone !== phoneConfirm){
+      missing.push('WhatsApp Number confirmation (both entries must match)');
+      document.getElementById('phone').classList.add('field-err');
+      document.getElementById('phoneConfirm').classList.add('field-err');
+    }
     if(payload.adults.length === 0 && payload.kids.length === 0){ missing.push('At least one adult or kid'); }
     return missing;
   }
@@ -376,6 +426,8 @@
     document.getElementById('flat').value = '';
     document.getElementById('contact').value = '';
     document.getElementById('phone').value = '';
+    document.getElementById('phoneConfirm').value = '';
+    document.getElementById('phoneMatchMsg').innerText = '';
     document.getElementById('txnRef').value = '';
     document.getElementById('paidCheck').checked = false;
     clearFieldErrors();
