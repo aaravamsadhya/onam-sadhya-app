@@ -132,7 +132,7 @@ async function qrDataUrl(text) {
 }
 
 // ================= STATIC PAGE ROUTING =================
-app.get('/', (req, res) => {
+app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'public', 'admin.html'))); app.get('/scanner', (req, res) => res.sendFile(path.join(__dirname, 'public', 'scanner.html'))); app.get('/', (req, res) => {
   const token = req.query.t;
   const page = String(req.query.page || '').toLowerCase();
   if (token) return res.sendFile(path.join(__dirname, 'public', 'guest.html'));
