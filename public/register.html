@@ -96,11 +96,7 @@
     <input type="text" id="contact" placeholder="e.g. Arjun Cheruvathari">
 
     <label class="required">Your WhatsApp Number</label>
-    <input type="tel" id="phone" placeholder="10-digit mobile number" maxlength="10" oninput="this.value=this.value.replace(/\D/g,'').slice(0,10);checkPhoneMatch()">
-
-    <label class="required">Re-enter WhatsApp Number</label>
-    <input type="tel" id="phoneConfirm" placeholder="Type it again" maxlength="10" oninput="this.value=this.value.replace(/\D/g,'').slice(0,10);checkPhoneMatch()" onpaste="return false;">
-    <div id="phoneMatchMsg" style="font-size:12px;margin-top:-6px;margin-bottom:6px;"></div>
+    <input type="tel" id="phone" placeholder="10-digit mobile number" maxlength="10" oninput="this.value=this.value.replace(/\D/g,'').slice(0,10);updatePhoneReview()">
 
     <label style="margin-top:16px;">Adults (₹<span class="adultPriceTxt">450</span> each)</label>
     <div id="adultsList"></div>
@@ -129,6 +125,7 @@
     </div>
     <label>Transaction Reference / Last 4 digits (optional)</label>
     <input type="text" id="txnRef" placeholder="e.g. UPI Ref No.">
+    <div class="center" id="phoneReviewLine" style="margin-top:10px;font-weight:700;color:var(--leaf-dark);"></div>
     <div class="checkline">
       <input type="checkbox" id="paidCheck">
       <label for="paidCheck" style="margin:0;">I have completed the payment for the amount shown above</label>
@@ -361,7 +358,7 @@
   }
 
   function clearFieldErrors(){
-    ['flat','contact','phone','phoneConfirm'].forEach(function(id){ document.getElementById(id).classList.remove('field-err'); });
+    ['flat','contact','phone'].forEach(function(id){ document.getElementById(id).classList.remove('field-err'); });
     document.getElementById('phasePH1').classList.remove('field-err');
     document.getElementById('phasePH2').classList.remove('field-err');
     document.getElementById('towerA').classList.remove('field-err');
@@ -369,18 +366,20 @@
     document.getElementById('towerC').classList.remove('field-err');
   }
 
-  // Live feedback as the resident retypes their number into the confirm field - this is a
-  // typo-catcher, not a real "is this a WhatsApp number" check (the app has no way to verify
-  // that without a paid SMS/WhatsApp API). Paste is blocked on the confirm field (see its
-  // onpaste handler) specifically so this catches genuine retyping mistakes rather than someone
-  // pasting the same wrong number into both fields.
-  function checkPhoneMatch(){
-    var phone = document.getElementById('phone').value;
-    var confirm = document.getElementById('phoneConfirm').value;
-    var msg = document.getElementById('phoneMatchMsg');
-    if(!confirm){ msg.innerText = ''; return; }
-    if(phone === confirm){ msg.style.color = '#0B6E4F'; msg.innerText = '✓ Numbers match'; }
-    else { msg.style.color = '#8E1B1B'; msg.innerText = '✗ Doesn\'t match'; }
+  // Instead of asking the resident to retype their number into a second field (extra friction,
+  // and a mismatched retype just as easily forces a redo as it does catch a typo), we show the
+  // number back to them in plain text right above the Submit button. People are reliably good at
+  // spotting a wrong number when they see it rendered back to them, so this catches the same
+  // "fat-fingered digit" mistakes with a single field instead of two.
+  function updatePhoneReview(){
+    var raw = document.getElementById('phone').value;
+    var el = document.getElementById('phoneReviewLine');
+    if(!raw){ el.innerText = ''; return; }
+    if(raw.length === 10){
+      el.innerText = 'Coupons will be sent to: +91 ' + raw.slice(0,5) + ' ' + raw.slice(5);
+    } else {
+      el.innerText = 'Coupons will be sent to: ' + raw + ' (' + (10 - raw.length) + ' more digit' + (10 - raw.length !== 1 ? 's' : '') + ' needed)';
+    }
   }
 
   function validateRequired(payload){
@@ -395,14 +394,9 @@
     }
     if(!payload.flat){ missing.push('Flat Number'); document.getElementById('flat').classList.add('field-err'); }
     if(!payload.contact){ missing.push('Your Name'); document.getElementById('contact').classList.add('field-err'); }
-    var phoneConfirm = document.getElementById('phoneConfirm').value;
     if(!payload.phone || !/^[6-9]\d{9}$/.test(payload.phone.replace(/\D/g,''))){
       missing.push('WhatsApp Number (valid 10-digit mobile number, starting 6-9)');
       document.getElementById('phone').classList.add('field-err');
-    } else if(payload.phone !== phoneConfirm){
-      missing.push('WhatsApp Number confirmation (both entries must match)');
-      document.getElementById('phone').classList.add('field-err');
-      document.getElementById('phoneConfirm').classList.add('field-err');
     }
     if(payload.adults.length === 0 && payload.kids.length === 0){ missing.push('At least one adult or kid'); }
     return missing;
@@ -426,8 +420,7 @@
     document.getElementById('flat').value = '';
     document.getElementById('contact').value = '';
     document.getElementById('phone').value = '';
-    document.getElementById('phoneConfirm').value = '';
-    document.getElementById('phoneMatchMsg').innerText = '';
+    document.getElementById('phoneReviewLine').innerText = '';
     document.getElementById('txnRef').value = '';
     document.getElementById('paidCheck').checked = false;
     clearFieldErrors();
