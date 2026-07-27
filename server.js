@@ -112,6 +112,38 @@ function pad3(n) {
 // way if someone tampers with the value client-side.
 const TOWER_OPTIONS = ['Tower A', 'Tower B', 'Tower C'];
 
+// The exact list of real DSR White Waters flat numbers, per Phase + Tower (each of the 3 towers
+// in each phase is a 4-floor building, plus a ground floor of smaller "G" units) - taken directly
+// from the community's official flat list so a registration can't be entered against a flat that
+// doesn't actually exist. Shared between new registrations and admin edits so both reject the
+// same way. Keep this in sync with the source flat list if new blocks/units are ever added.
+const VALID_FLATS = {
+  PH1: {
+    A: ["101","102","103","104","105","106","107","108","109","110","111","112","113","114","201","202","203","204","205","206","207","208","209","210","211","212","213","214","301","302","303","304","305","306","307","308","309","310","311","312","313","314","401","402","403","404","405","406","407","408","409","410","411","412","413","414","G10","G11","G12","G13","G2","G3","G4","G5","G6","G8","G9"],
+    B: ["101","102","103","104","105","106","107","108","109","110","111","112","113","114","115","116","117","118","201","202","203","204","205","206","207","208","209","210","211","212","213","214","215","216","217","218","301","302","303","304","305","306","307","308","309","310","311","312","313","314","315","316","317","318","401","402","403","404","405","406","407","408","409","410","411","412","413","414","415","416","417","418","G1","G10","G11","G12","G13","G14","G15","G16","G17","G18","G2","G4","G5","G6","G7","G8","G9"],
+    C: ["101","102","103","104","105","106","107","108","109","110","111","112","113","201","202","203","204","205","206","207","208","209","210","211","212","213","301","302","303","304","305","306","307","308","309","310","311","312","313","401","402","403","404","405","406","407","408","409","410","411","412","413","G1","G10","G11","G12","G13","G2","G3","G4","G5","G6","G7","G8","G9"]
+  },
+  PH2: {
+    A: ["101","102","103","104","105","106","107","108","109","110","111","112","113","114","115","116","201","202","203","204","205","206","207","208","209","210","211","212","213","214","215","216","301","302","303","304","305","306","307","308","309","310","311","312","313","314","315","316","401","402","403","404","405","406","407","408","409","410","411","412","413","414","415","416","G10","G11","G12","G13","G14","G15","G16","G5","G6","G7","G8","G9"],
+    B: ["101","102","103","104","105","106","107","108","109","110","111","112","201","202","203","204","205","206","207","208","209","210","211","212","301","302","303","304","305","306","307","308","309","310","311","312","401","402","403","404","405","406","407","408","409","410","411","412","G1","G10","G11","G12","G2","G3","G4","G5","G6","G7","G8","G9"],
+    C: ["101","102","103","104","105","106","107","108","109","110","111","201","202","203","204","205","206","207","208","209","210","211","301","302","303","304","305","306","307","308","309","310","311","312","313","401","402","403","404","405","406","407","408","409","410","411","412","413","G1","G10","G11","G2","G3","G4","G5","G6","G7","G8","G9"]
+  }
+};
+
+// Flat numbers are typed by hand, so accept a bit of stray whitespace/casing/punctuation before
+// checking against the real list (e.g. "g10", " G-10 ") - this normalizes to the exact form used
+// in VALID_FLATS ("G10") without being so lenient that it accepts something that isn't real.
+function normalizeFlat(raw) {
+  return String(raw || '').trim().toUpperCase().replace(/[\s-]+/g, '');
+}
+
+function isValidFlat(phase, tower, flat) {
+  const towerLetter = (tower || '').replace('Tower ', '').trim();
+  const list = VALID_FLATS[phase] && VALID_FLATS[phase][towerLetter];
+  if (!list) return false;
+  return list.indexOf(normalizeFlat(flat)) !== -1;
+}
+
 function baseUrl(req) {
   const proto = req.headers['x-forwarded-proto'] || req.protocol;
   return proto + '://' + req.get('host');
@@ -132,7 +164,13 @@ async function qrDataUrl(text) {
 }
 
 // ================= STATIC PAGE ROUTING =================
-app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'public', 'admin.html'))); app.get('/scanner', (req, res) => res.sendFile(path.join(__dirname, 'public', 'scanner.html'))); app.get('/', (req, res) => {
+// Clean URLs (/admin, /scanner) are the ones to actually share/bookmark - the old ?page=admin
+// and ?page=scan query-string form on '/' is kept working alongside them (rather than removed)
+// so any link already shared or saved before this change doesn't silently break.
+app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'public', 'admin.html')));
+app.get('/scanner', (req, res) => res.sendFile(path.join(__dirname, 'public', 'scanner.html')));
+
+app.get('/', (req, res) => {
   const token = req.query.t;
   const page = String(req.query.page || '').toLowerCase();
   if (token) return res.sendFile(path.join(__dirname, 'public', 'guest.html'));
@@ -164,7 +202,7 @@ app.post('/api/register', async (req, res) => {
   try {
     const body = req.body || {};
     const contact = (body.contact || '').trim();
-    const flat = (body.flat || '').trim();
+    const flat = normalizeFlat(body.flat);
     const phase = (body.phase || '').trim().toUpperCase();
     const tower = (body.tower || '').trim();
     const phone = normalizePhone(body.phone);
@@ -177,9 +215,15 @@ app.post('/api/register', async (req, res) => {
     if (phase !== 'PH1' && phase !== 'PH2') return res.json({ success: false, message: 'Please select a Phase' });
     if (!TOWER_OPTIONS.includes(tower)) return res.json({ success: false, message: 'Please select a Tower' });
     if (!flat) return res.json({ success: false, message: 'Please enter your flat number' });
+    // Rejects any flat number that isn't on the real DSR White Waters list for the selected
+    // Phase/Tower - catches typos (wrong floor, wrong block) before a registration is ever saved.
+    if (!isValidFlat(phase, tower, flat)) return res.json({ success: false, message: 'This is not a valid DSRWW flat number for the selected Phase/Tower. Please check and re-enter.' });
     // normalizePhone only adds the 91 prefix when the raw input is exactly 10 digits, so any
     // valid number (10 digits, or already 12 with the 91 prefix) normalizes to exactly 12
     // characters. Anything else (too short OR too long, e.g. an accidental extra digit) is invalid.
+    // Additionally, real Indian mobile numbers always start with 6, 7, 8, or 9 (per TRAI's
+    // numbering plan), so this also rejects clearly-fake numbers (e.g. starting 0-5) that happen
+    // to be the right length - mirrors the same check done client-side on the registration form.
     if (!/^91[6-9]\d{9}$/.test(phone)) return res.json({ success: false, message: 'Please enter a valid 10-digit mobile number (starting 6-9)' });
     if (adults.length === 0 && kids.length === 0) return res.json({ success: false, message: 'Please add at least one adult or kid' });
 
@@ -572,7 +616,7 @@ app.post('/api/admin/update-registration', async (req, res) => {
   try {
     const body = req.body || {};
     const regId = body.regId;
-    const flat = (body.flat || '').trim();
+    const flat = normalizeFlat(body.flat);
     const phase = (body.phase || '').trim().toUpperCase();
     const tower = (body.tower || '').trim();
     const contact = (body.contact || '').trim();
@@ -583,6 +627,7 @@ app.post('/api/admin/update-registration', async (req, res) => {
     if (!flat) { client.release(); return res.json({ success: false, message: 'Flat number is required' }); }
     if (phase !== 'PH1' && phase !== 'PH2') { client.release(); return res.json({ success: false, message: 'Please select a Phase' }); }
     if (!TOWER_OPTIONS.includes(tower)) { client.release(); return res.json({ success: false, message: 'Please select a Tower' }); }
+    if (!isValidFlat(phase, tower, flat)) { client.release(); return res.json({ success: false, message: 'This is not a valid DSRWW flat number for the selected Phase/Tower. Please check and re-enter.' }); }
     if (!contact) { client.release(); return res.json({ success: false, message: 'Contact name is required' }); }
     if (!/^91[6-9]\d{9}$/.test(phone)) { client.release(); return res.json({ success: false, message: 'Please enter a valid 10-digit mobile number (starting 6-9)' }); }
     if (newAdults.length === 0 && newKids.length === 0) { client.release(); return res.json({ success: false, message: 'At least one adult or kid is required' }); }
