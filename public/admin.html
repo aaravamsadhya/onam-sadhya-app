@@ -157,6 +157,12 @@
       <input type="text" id="regFilter" placeholder="🔍 Filter registrations by flat, name, phone or reg ID" oninput="applyRegFilter()">
     </div>
 
+    <div class="card" id="awaitingShareCard" style="border:2px solid #d98c00;">
+      <h2>🔔 Awaiting Coupon Share <span class="pill pending" id="awaitingShareCountBadge">0</span></h2>
+      <p style="font-size:12px;color:#8a7a4d;margin:0 0 10px;">Confirmed families whose coupons haven't been marked as shared yet - newest first, so nobody gets lost once the Confirmed list grows long.</p>
+      <div id="awaitingShareList"></div>
+    </div>
+
     <div class="card">
       <h2>Pending Registrations <span class="pill pending" id="pendingCountBadge">0</span></h2>
       <div id="pendingList"></div>
@@ -198,7 +204,6 @@
           <option value="2">Slot 2</option>
           <option value="3">Slot 3</option>
           <option value="4">Slot 4</option>
-          <option value="5">Slot 5</option>
         </select>
       </div>
       <button class="btn-confirm" style="width:100%;" onclick="bulkDownloadZip()">⬇ Download ZIP of Coupon Images</button>
@@ -689,9 +694,21 @@
       stat(totalAdults + totalKids, 'Total People') +
       stat('₹' + totalRevenue, 'Revenue Confirmed');
 
+    // Confirmed-but-not-yet-shared, newest confirmation first - this is the list an admin should
+    // check right after confirming a payment, instead of hunting through the full Confirmed
+    // Registrations list below for the one they just added.
+    var awaitingShare = confirmed
+      .filter(function(r){ return !r.couponShared; })
+      .sort(function(a, b){ return new Date(b.confirmedAt || 0) - new Date(a.confirmedAt || 0); });
+
     document.getElementById('pendingCountBadge').innerText = pending.length;
     document.getElementById('confirmedCountBadge').innerText = confirmed.length;
     document.getElementById('rejectedCountBadge').innerText = rejected.length;
+    document.getElementById('awaitingShareCountBadge').innerText = awaitingShare.length;
+
+    document.getElementById('awaitingShareList').innerHTML = awaitingShare.length
+      ? awaitingShare.map(renderConfirmedRow).join('')
+      : '<div class="empty-note">' + (q ? 'No matches.' : 'All caught up — every confirmed family has had coupons shared.') + '</div>';
 
     document.getElementById('pendingList').innerHTML = pending.length
       ? pending.map(renderPendingRow).join('')
@@ -758,18 +775,24 @@
 
   function renderConfirmedRow(r, i){
     var chips = (r.coupons||[]).map(couponRowChip).join('');
+    var sharePill = r.couponShared
+      ? '<span class="pill confirmed" title="Marked shared on ' + escapeHtml(fmtDateShort(r.couponSharedAt)) + '">✓ Shared</span>'
+      : '<span class="pill pending">Not shared yet</span>';
     var actions = IS_READONLY ? '' :
       '<div class="reg-actions">' +
       '<button class="btn-wa" onclick="shareCoupons(\'' + r.regId + '\')">📱 Share Coupons on WhatsApp</button>' +
       '<button class="btn-secondary" onclick="shareReminder(\'' + r.regId + '\')">⏰ Send Slot Reminder</button>' +
       '<button class="btn-manage" onclick="manageReg(\'' + r.regId + '\')">✎ Manage</button>' +
+      (r.couponShared
+        ? '<button class="btn-secondary" onclick="toggleCouponShared(\'' + r.regId + '\', false)" title="Undo if this was marked shared by mistake">↺ Mark Not Shared</button>'
+        : '<button class="btn-secondary" onclick="toggleCouponShared(\'' + r.regId + '\', true)" title="Use this if coupons were already shared some other way (e.g. in person)">✓ Mark as Shared</button>') +
       '</div>';
     return '<div class="reg-card">' +
       '<div class="reg-head"><div><span class="sno">' + (i+1) + '</span>' +
       '<span class="reg-id">' + r.regId + '</span> — ' + escapeHtml(r.flat) + phaseTag(r) + towerTag(r) + ' — ' + escapeHtml(r.contact) + '</div>' +
       '<span class="pill confirmed">Confirmed</span></div>' +
       '<div class="reg-contact" style="margin-top:4px;">' + phoneLink(r.phone) + ' &middot; ₹' + r.total +
-      (r.confirmedBy ? (' &middot; Confirmed by ' + escapeHtml(r.confirmedBy)) : '') + '</div>' +
+      (r.confirmedBy ? (' &middot; Confirmed by ' + escapeHtml(r.confirmedBy)) : '') + ' &middot; ' + sharePill + '</div>' +
       '<div class="reg-people">Adults: ' + ((r.adults||[]).join(', ') || '—') + '<br>Kids: ' + ((r.kids||[]).join(', ') || '—') + '</div>' +
       '<div class="coupon-chips">' + (chips || '<span class="empty-note">No coupons found</span>') + '</div>' +
       actions + '</div>';
@@ -834,7 +857,27 @@
     try{
       var res = await api('GET', '/api/admin/share-coupons?regId=' + encodeURIComponent(regId) + '&pin=' + encodeURIComponent(PIN));
       if(!res.success){ alert(res.message); return; }
-      window.open(res.waUrl, '_blank');
+      var win = window.open(res.waUrl, '_blank');
+      if(!win){
+        // Popup got blocked (this happens more often right after "Confirm Payment", since the
+        // window.open call there follows an earlier await and some browsers no longer treat that
+        // as a direct click) - don't mark it shared, since nothing actually opened for the admin to send.
+        alert('Your browser blocked the WhatsApp share window. Please allow pop-ups for this site, then click "Share Coupons on WhatsApp" again.');
+        return;
+      }
+      // The share window opened - mark this registration as shared so it drops out of the
+      // "Awaiting Coupon Share" list, then refresh so every open view (that list, the Confirmed
+      // list) reflects it immediately.
+      await api('POST', '/api/admin/mark-coupon-shared', { pin: PIN, regId: regId, shared: true });
+      await refreshAll();
+    }catch(err){ alert('Error: ' + err.message); }
+  }
+
+  async function toggleCouponShared(regId, shared){
+    try{
+      var res = await api('POST', '/api/admin/mark-coupon-shared', { pin: PIN, regId: regId, shared: shared });
+      if(!res.success){ alert(res.message); return; }
+      await refreshAll();
     }catch(err){ alert('Error: ' + err.message); }
   }
 
@@ -991,6 +1034,11 @@
 
   function escapeHtml(s){
     return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function fmtDateShort(d){
+    if(!d) return '';
+    return new Date(d).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' });
   }
 
   function showMsg(elId, text, cls){
