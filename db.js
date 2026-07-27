@@ -86,14 +86,22 @@ CREATE TABLE IF NOT EXISTS deleted_registrations (
 -- effect on a database that already had this table before tower existed - this ALTER covers
 -- those already-deployed apps so the column shows up either way.
 ALTER TABLE deleted_registrations ADD COLUMN IF NOT EXISTS tower TEXT;
+
+-- Tracks whether the "Share Coupons on WhatsApp" step has actually been done for a Confirmed
+-- registration, so the admin console can flag anyone still waiting instead of relying on the
+-- admin to remember/spot them in a long Confirmed list.
+ALTER TABLE registrations ADD COLUMN IF NOT EXISTS coupon_shared BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE registrations ADD COLUMN IF NOT EXISTS coupon_shared_at TIMESTAMPTZ;
 `;
 
+// Sized for a maximum expected turnout of ~400 people: 4 slots x 110 capacity = 440, with
+// 45 minutes between each slot's start time. (Previously 5 slots, up to 3:00 PM - trimmed
+// down to 4 now that the real attendance ceiling is known.)
 const DEFAULT_SLOTS = [
   [1, '12:00 PM', 110],
   [2, '12:45 PM', 110],
   [3, '1:30 PM', 110],
-  [4, '2:15 PM', 110],
-  [5, '3:00 PM', 110]
+  [4, '2:15 PM', 110]
 ];
 
 async function init() {
@@ -104,6 +112,11 @@ async function init() {
       [num, time, cap]
     );
   }
+  // Registration is still in testing (not yet live to residents), so there's no real slot 5
+  // booking to worry about - safe to just drop any slot rows outside the current 4, in case an
+  // earlier test run already seeded the old 5-slot list into this database.
+  const keepNums = DEFAULT_SLOTS.map(s => s[0]);
+  await pool.query('DELETE FROM slots WHERE slot_number != ALL($1::int[])', [keepNums]);
   console.log('Database schema ready.');
 }
 
