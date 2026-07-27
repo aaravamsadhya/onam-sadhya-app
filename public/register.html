@@ -90,7 +90,8 @@
     </div>
 
     <label class="required">Flat Number</label>
-    <input type="text" id="flat" placeholder="e.g. 412" oninput="updateTotal()">
+    <input type="text" id="flat" placeholder="e.g. 412 or G10" oninput="updateTotal()">
+    <div style="font-size:12px;color:#8a7a4d;margin:-2px 0 6px;">Enter just the flat number for your Phase/Tower above (e.g. 412, or a ground-floor unit like G10).</div>
 
     <label class="required">Your Name (Primary Contact)</label>
     <input type="text" id="contact" placeholder="e.g. Arjun Cheruvathari">
@@ -167,6 +168,37 @@
   var phase = '';
   var tower = '';
   var cfg = { adultPrice: 450, kidPrice: 250, upiId: '', upiName: 'Aaravam Sadhya Committee' };
+
+  // The exact list of real DSR White Waters flat numbers, per Phase + Tower (each of the 3
+  // towers in each phase is a 4-floor building, plus a ground floor of smaller "G" units) - taken
+  // directly from the community's official flat list, so a registration can't be submitted
+  // against a flat that doesn't actually exist. Mirrored server-side in server.js so a request
+  // sent straight to the API (bypassing this form) is rejected the same way.
+  var VALID_FLATS = {
+    PH1: {
+      A: ["101","102","103","104","105","106","107","108","109","110","111","112","113","114","201","202","203","204","205","206","207","208","209","210","211","212","213","214","301","302","303","304","305","306","307","308","309","310","311","312","313","314","401","402","403","404","405","406","407","408","409","410","411","412","413","414","G10","G11","G12","G13","G2","G3","G4","G5","G6","G8","G9"],
+      B: ["101","102","103","104","105","106","107","108","109","110","111","112","113","114","115","116","117","118","201","202","203","204","205","206","207","208","209","210","211","212","213","214","215","216","217","218","301","302","303","304","305","306","307","308","309","310","311","312","313","314","315","316","317","318","401","402","403","404","405","406","407","408","409","410","411","412","413","414","415","416","417","418","G1","G10","G11","G12","G13","G14","G15","G16","G17","G18","G2","G4","G5","G6","G7","G8","G9"],
+      C: ["101","102","103","104","105","106","107","108","109","110","111","112","113","201","202","203","204","205","206","207","208","209","210","211","212","213","301","302","303","304","305","306","307","308","309","310","311","312","313","401","402","403","404","405","406","407","408","409","410","411","412","413","G1","G10","G11","G12","G13","G2","G3","G4","G5","G6","G7","G8","G9"]
+    },
+    PH2: {
+      A: ["101","102","103","104","105","106","107","108","109","110","111","112","113","114","115","116","201","202","203","204","205","206","207","208","209","210","211","212","213","214","215","216","301","302","303","304","305","306","307","308","309","310","311","312","313","314","315","316","401","402","403","404","405","406","407","408","409","410","411","412","413","414","415","416","G10","G11","G12","G13","G14","G15","G16","G5","G6","G7","G8","G9"],
+      B: ["101","102","103","104","105","106","107","108","109","110","111","112","201","202","203","204","205","206","207","208","209","210","211","212","301","302","303","304","305","306","307","308","309","310","311","312","401","402","403","404","405","406","407","408","409","410","411","412","G1","G10","G11","G12","G2","G3","G4","G5","G6","G7","G8","G9"],
+      C: ["101","102","103","104","105","106","107","108","109","110","111","201","202","203","204","205","206","207","208","209","210","211","301","302","303","304","305","306","307","308","309","310","311","312","313","401","402","403","404","405","406","407","408","409","410","411","412","413","G1","G10","G11","G2","G3","G4","G5","G6","G7","G8","G9"]
+    }
+  };
+
+  // Accept a bit of stray whitespace/casing/punctuation before checking against the real list
+  // (e.g. "g10", " G-10 ") without being so lenient it accepts something that isn't real.
+  function normalizeFlat(raw){
+    return String(raw || '').trim().toUpperCase().replace(/[\s-]+/g, '');
+  }
+
+  function isValidFlat(ph, tw, flatRaw){
+    var towerLetter = (tw || '').replace('Tower ', '').trim();
+    var list = VALID_FLATS[ph] && VALID_FLATS[ph][towerLetter];
+    if(!list) return false;
+    return list.indexOf(normalizeFlat(flatRaw)) !== -1;
+  }
 
   function selectPhase(p){
     phase = p;
@@ -392,7 +424,14 @@
       document.getElementById('towerB').classList.add('field-err');
       document.getElementById('towerC').classList.add('field-err');
     }
-    if(!payload.flat){ missing.push('Flat Number'); document.getElementById('flat').classList.add('field-err'); }
+    if(!payload.flat){
+      missing.push('Flat Number');
+      document.getElementById('flat').classList.add('field-err');
+    } else if(payload.phase && payload.tower && !isValidFlat(payload.phase, payload.tower, payload.flat)){
+      // Only checked once Phase/Tower are picked, since the valid list depends on both.
+      missing.push('Flat Number (not a valid DSRWW flat number for the selected Phase/Tower - please check and re-enter)');
+      document.getElementById('flat').classList.add('field-err');
+    }
     if(!payload.contact){ missing.push('Your Name'); document.getElementById('contact').classList.add('field-err'); }
     if(!payload.phone || !/^[6-9]\d{9}$/.test(payload.phone.replace(/\D/g,''))){
       missing.push('WhatsApp Number (valid 10-digit mobile number, starting 6-9)');
@@ -476,7 +515,7 @@
     document.getElementById('formCard').innerHTML = '<h2>Registered!</h2>' +
       '<p>Thanks, ' + escapeHtml(payload.contact) + '! Your registration <b>' + res.regId + '</b> for ₹' + res.total + ' has been received.</p>' +
       '<p>The Sadhya committee will verify your payment and send your individual coupons to this WhatsApp number shortly.</p>' +
-      '<button class="btn-secondary" style="width:100%;margin-top:14px;" onclick="goHome()">🏠 Back to Home</button>';
+      '<button class="btn-primary" style="width:100%;margin-top:14px;" onclick="goHome()">🏠 Back to Home</button>';
     document.getElementById('payCard').classList.add('hidden');
   }
 
@@ -535,7 +574,7 @@
     var el = document.getElementById('statusResult');
     if(!res.found){
       el.innerHTML = '<div class="center">No registration found for this number.</div>' +
-        '<button class="btn-secondary" style="width:100%;margin-top:14px;" onclick="goHome()">🏠 Back to Home</button>';
+        '<button class="btn-primary" style="width:100%;margin-top:14px;" onclick="goHome()">🏠 Back to Home</button>';
       return;
     }
     var html = '';
@@ -558,7 +597,7 @@
     if(res.registrations.length > 1){
       html = '<div style="margin-bottom:10px;font-size:12px;color:#888;">This number has ' + res.registrations.length + ' registrations:</div>' + html;
     }
-    html += '<button class="btn-secondary" style="width:100%;margin-top:14px;" onclick="goHome()">🏠 Back to Home</button>';
+    html += '<button class="btn-primary" style="width:100%;margin-top:14px;" onclick="goHome()">🏠 Back to Home</button>';
     el.innerHTML = html;
   }
 
