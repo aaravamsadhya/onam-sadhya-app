@@ -340,6 +340,7 @@ app.get('/api/admin/registrations', async (req, res) => {
         submittedAt: row.submitted_at,
         confirmedBy: row.confirmed_by, confirmedAt: row.confirmed_at,
         rejectedReason: row.rejected_reason, rejectedBy: row.rejected_by, rejectedAt: row.rejected_at,
+        couponShared: row.coupon_shared, couponSharedAt: row.coupon_shared_at,
         coupons
       };
     });
@@ -449,6 +450,28 @@ app.get('/api/admin/share-coupons', async (req, res) => {
     msg += 'Onam Ashamsakal!\n';
     msg += 'Team Aaravam 2026';
     res.json({ success: true, waUrl: buildWhatsAppLink(reg.phone, msg), phone: reg.phone });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Server error: ' + err.message });
+  }
+});
+
+// Marks a Confirmed registration as "coupon shared" so it drops out of the "Awaiting Coupon
+// Share" list on the admin console. The admin.html client calls this right after the WhatsApp
+// share window actually opens successfully (see shareCoupons() there) - it can also be called
+// to flip a registration back to "not shared" if the admin needs to correct a mistake.
+app.post('/api/admin/mark-coupon-shared', async (req, res) => {
+  const access = requireWriteAccess((req.body || {}).pin);
+  if (!access.ok) return res.json({ success: false, message: access.message });
+  try {
+    const { regId, shared } = req.body || {};
+    const isShared = shared !== false; // defaults to true unless explicitly told to unset
+    const r = await pool.query(
+      'UPDATE registrations SET coupon_shared=$1, coupon_shared_at=' + (isShared ? 'now()' : 'NULL') + ' WHERE reg_id=$2 RETURNING reg_id',
+      [isShared, regId]
+    );
+    if (!r.rows.length) return res.json({ success: false, message: 'Registration not found' });
+    res.json({ success: true });
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, message: 'Server error: ' + err.message });
