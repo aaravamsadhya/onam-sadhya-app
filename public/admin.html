@@ -51,6 +51,20 @@
   .reg-actions{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;}
   .reg-actions button{flex:1;min-width:140px;}
 
+  /* Collapsible Phase -> Tower grouping for the Confirmed Registrations list. Native
+     <details>/<summary> is used instead of custom JS toggling - it's collapsed by default for
+     free, keyboard accessible, and needs no extra event wiring. */
+  details.group-phase{margin-bottom:14px;border:1.5px solid #eee;border-radius:12px;padding:4px 12px 10px;background:#fafafa;}
+  details.group-phase > summary{cursor:pointer;font-weight:800;font-size:15px;color:var(--leaf-dark);list-style:none;padding:10px 0;display:flex;align-items:center;gap:8px;}
+  details.group-phase > summary::-webkit-details-marker{display:none;}
+  details.group-phase > summary:before{content:'\25B6';display:inline-block;font-size:11px;transition:transform .15s;color:var(--gold-dark);}
+  details.group-phase[open] > summary:before{transform:rotate(90deg);}
+  details.group-tower{margin:8px 0;border-left:3px solid var(--gold);padding-left:10px;}
+  details.group-tower > summary{cursor:pointer;font-weight:700;font-size:13px;color:#555;list-style:none;padding:6px 0;display:flex;align-items:center;gap:6px;}
+  details.group-tower > summary::-webkit-details-marker{display:none;}
+  details.group-tower > summary:before{content:'\25B8';display:inline-block;font-size:10px;transition:transform .15s;}
+  details.group-tower[open] > summary:before{transform:rotate(90deg);}
+
   .result-row{display:flex;justify-content:space-between;align-items:center;padding:8px 4px;border-bottom:1px solid #f2f2f2;font-size:13px;}
   .pill.yes{background:#E6F4EA;color:#0B6E4F;}
   .pill.no{background:#f0f0f0;color:#888;}
@@ -164,53 +178,6 @@
       <h2>🔔 Awaiting Coupon Share <span class="pill pending" id="awaitingShareCountBadge">0</span></h2>
       <p style="font-size:12px;color:#8a7a4d;margin:0 0 10px;">Confirmed resident families whose coupons haven't been marked as shared yet - newest first, so nobody gets lost once the Confirmed list grows long.</p>
       <div id="awaitingShareList"></div>
-    </div>
-
-    <div class="card" id="sponsorShareCard" style="border:2px solid #0d6ea8;">
-      <h2>📱 Artist / Sponsor Coupons <span class="pill pending" id="sponsorShareCountBadge">0</span></h2>
-      <p style="font-size:12px;color:#8a7a4d;margin:0 0 10px;">Grouped by committee SPOC, so every group that person is coordinating goes out in a single WhatsApp message instead of one per group.</p>
-      <div id="sponsorShareList"></div>
-    </div>
-
-    <div class="card" id="addSponsorCard">
-      <h2>+ Add Artist / Sponsor Registration</h2>
-      <p style="font-size:12px;color:#8a7a4d;margin:0 0 10px;">For coupons requested by a committee on behalf of an artist, performer, or sponsor - payment is settled later by the treasurer, not collected here. This does not appear on the public registration page.</p>
-
-      <label>Committee Name</label>
-      <input type="text" id="spCommittee" placeholder="e.g. Cultural Committee">
-
-      <div style="display:flex;gap:10px;">
-        <div style="flex:1;">
-          <label>SPOC Name</label>
-          <input type="text" id="spSpocName" placeholder="e.g. Anu George">
-        </div>
-        <div style="flex:1;">
-          <label>SPOC WhatsApp Number</label>
-          <input type="tel" id="spSpocPhone" placeholder="10-digit mobile number" maxlength="10" oninput="this.value=this.value.replace(/\D/g,'').slice(0,10)">
-        </div>
-      </div>
-
-      <label>Group / Artist / Sponsor Name</label>
-      <input type="text" id="spOrgName" placeholder="e.g. Kerala Arts Troupe">
-
-      <label style="margin-top:16px;">Adults (₹450 each)</label>
-      <div id="spAdultsList"></div>
-      <button type="button" class="btn-add-name" onclick="addSponsorPerson('adults')">+ Add Adult</button>
-
-      <label style="margin-top:16px;">Kids (optional, ₹250 each)</label>
-      <div id="spKidsList"></div>
-      <button type="button" class="btn-add-name" onclick="addSponsorPerson('kids')">+ Add Kid</button>
-
-      <label style="margin-top:16px;">Notes (optional)</label>
-      <input type="text" id="spNotes" placeholder="e.g. Stage performance, arriving 11:30 AM">
-
-      <div class="total-box">
-        <div class="amt">₹<span id="spTotalAmt">0</span></div>
-        <div class="brk" id="spTotalBrk">0 adults, 0 kids &middot; settled by treasurer, not paid via UPI</div>
-      </div>
-
-      <button class="btn-primary" onclick="submitSponsorRegistration()">Save Registration (goes to Pending)</button>
-      <div class="msg" id="spMsg"></div>
     </div>
 
     <div class="card">
@@ -332,6 +299,56 @@
           <button class="btn-danger" style="width:100%;" onclick="deleteManagedReg()">🗑 Delete This Registration</button>
         </div>
       </div>
+    </div>
+
+    <!-- Sponsor/Artist tools are used far less often than the day-to-day Pending/Confirmed
+         workflow, so they live down here at the bottom instead of pushing Pending Registrations
+         further down the page where it could get missed. -->
+    <div class="card" id="sponsorShareCard" style="border:2px solid #0d6ea8;">
+      <h2>📱 Artist / Sponsor Coupons <span class="pill pending" id="sponsorShareCountBadge">0</span></h2>
+      <p style="font-size:12px;color:#8a7a4d;margin:0 0 10px;">Grouped by committee SPOC, so every group that person is coordinating goes out in a single WhatsApp message instead of one per group.</p>
+      <div id="sponsorShareList"></div>
+    </div>
+
+    <div class="card" id="addSponsorCard">
+      <h2>+ Add Artist / Sponsor Registration</h2>
+      <p style="font-size:12px;color:#8a7a4d;margin:0 0 10px;">For coupons requested by a committee on behalf of an artist, performer, or sponsor - payment is settled later by the treasurer, not collected here. This does not appear on the public registration page.</p>
+
+      <label>Committee Name</label>
+      <input type="text" id="spCommittee" placeholder="e.g. Cultural Committee">
+
+      <div style="display:flex;gap:10px;">
+        <div style="flex:1;">
+          <label>SPOC Name</label>
+          <input type="text" id="spSpocName" placeholder="e.g. Anu George">
+        </div>
+        <div style="flex:1;">
+          <label>SPOC WhatsApp Number</label>
+          <input type="tel" id="spSpocPhone" placeholder="10-digit mobile number" maxlength="10" oninput="this.value=this.value.replace(/\D/g,'').slice(0,10)">
+        </div>
+      </div>
+
+      <label>Group / Artist / Sponsor Name</label>
+      <input type="text" id="spOrgName" placeholder="e.g. Kerala Arts Troupe">
+
+      <label style="margin-top:16px;">Adults (₹450 each)</label>
+      <div id="spAdultsList"></div>
+      <button type="button" class="btn-add-name" onclick="addSponsorPerson('adults')">+ Add Adult</button>
+
+      <label style="margin-top:16px;">Kids (optional, ₹250 each)</label>
+      <div id="spKidsList"></div>
+      <button type="button" class="btn-add-name" onclick="addSponsorPerson('kids')">+ Add Kid</button>
+
+      <label style="margin-top:16px;">Notes (optional)</label>
+      <input type="text" id="spNotes" placeholder="e.g. Stage performance, arriving 11:30 AM">
+
+      <div class="total-box">
+        <div class="amt">₹<span id="spTotalAmt">0</span></div>
+        <div class="brk" id="spTotalBrk">0 adults, 0 kids &middot; settled by treasurer, not paid via UPI</div>
+      </div>
+
+      <button class="btn-primary" onclick="submitSponsorRegistration()">Save Registration (goes to Pending)</button>
+      <div class="msg" id="spMsg"></div>
     </div>
 
   </div>
@@ -789,13 +806,65 @@
       ? pending.map(renderPendingRow).join('')
       : '<div class="empty-note">' + (q ? 'No matches.' : 'No pending registrations.') + '</div>';
 
-    document.getElementById('confirmedList').innerHTML = confirmed.length
-      ? confirmed.map(renderConfirmedRow).join('')
-      : '<div class="empty-note">' + (q ? 'No matches.' : 'No confirmed registrations yet.') + '</div>';
+    renderConfirmedGrouped(confirmed, q);
 
     document.getElementById('rejectedList').innerHTML = rejected.length
       ? rejected.map(renderRejectedRow).join('')
       : '<div class="empty-note">' + (q ? 'No matches.' : 'No rejected registrations.') + '</div>';
+  }
+
+  // Confirmed Registrations, grouped Phase -> Tower (collapsed by default, using native
+  // <details>/<summary> so no extra toggle JS is needed). Artist/Sponsor entries have no real
+  // phase/tower, so they get their own group at the end instead of being forced into one.
+  // While a search filter is active, every group is auto-expanded so a match isn't hidden
+  // behind a collapsed section the admin has to remember to click open.
+  function renderConfirmedGrouped(confirmed, q){
+    var container = document.getElementById('confirmedList');
+    if(!confirmed.length){
+      container.innerHTML = '<div class="empty-note">' + (q ? 'No matches.' : 'No confirmed registrations yet.') + '</div>';
+      return;
+    }
+    var residents = confirmed.filter(function(r){ return r.regType !== 'Sponsor'; });
+    var sponsors = confirmed.filter(function(r){ return r.regType === 'Sponsor'; });
+    var phaseOrder = ['PH1', 'PH2'];
+    var towerOrder = ['Tower A', 'Tower B', 'Tower C'];
+    var openAttr = q ? ' open' : '';
+    var html = '';
+
+    phaseOrder.forEach(function(phase){
+      var phaseRows = residents.filter(function(r){ return r.phase === phase; });
+      if(!phaseRows.length) return;
+      html += '<details class="group-phase"' + openAttr + '><summary>' + phase + ' <span class="pill confirmed">' + phaseRows.length + '</span></summary>';
+      towerOrder.forEach(function(tower){
+        var towerRows = phaseRows.filter(function(r){ return r.tower === tower; });
+        if(!towerRows.length) return;
+        html += '<details class="group-tower"' + openAttr + '><summary>' + tower + ' <span class="pill confirmed">' + towerRows.length + '</span></summary>';
+        html += towerRows.map(renderConfirmedRow).join('');
+        html += '</details>';
+      });
+      var otherTowerRows = phaseRows.filter(function(r){ return towerOrder.indexOf(r.tower) === -1; });
+      if(otherTowerRows.length){
+        html += '<details class="group-tower"' + openAttr + '><summary>Other / Unspecified Tower <span class="pill confirmed">' + otherTowerRows.length + '</span></summary>';
+        html += otherTowerRows.map(renderConfirmedRow).join('');
+        html += '</details>';
+      }
+      html += '</details>';
+    });
+
+    var otherPhaseRows = residents.filter(function(r){ return phaseOrder.indexOf(r.phase) === -1; });
+    if(otherPhaseRows.length){
+      html += '<details class="group-phase"' + openAttr + '><summary>Other / Unspecified Phase <span class="pill confirmed">' + otherPhaseRows.length + '</span></summary>';
+      html += otherPhaseRows.map(renderConfirmedRow).join('');
+      html += '</details>';
+    }
+
+    if(sponsors.length){
+      html += '<details class="group-phase"' + openAttr + '><summary>Artist / Sponsor <span class="pill confirmed">' + sponsors.length + '</span></summary>';
+      html += sponsors.map(renderConfirmedRow).join('');
+      html += '</details>';
+    }
+
+    container.innerHTML = html;
   }
 
   function phaseTag(r){
