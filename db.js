@@ -92,6 +92,22 @@ ALTER TABLE deleted_registrations ADD COLUMN IF NOT EXISTS tower TEXT;
 -- admin to remember/spot them in a long Confirmed list.
 ALTER TABLE registrations ADD COLUMN IF NOT EXISTS coupon_shared BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE registrations ADD COLUMN IF NOT EXISTS coupon_shared_at TIMESTAMPTZ;
+
+-- Lets the committee log complimentary coupons for artists/sponsors (settled later by the
+-- treasurer) separately from real resident registrations. reg_type is 'Resident' (the normal
+-- public-form flow, unchanged) or 'Sponsor' (added only via the admin console). committee_name/
+-- org_name/notes are only ever populated for 'Sponsor' entries - for those, "contact"/"phone"
+-- hold the committee SPOC's own name/number instead of a resident's, since that's who the
+-- coupons actually get shared to.
+ALTER TABLE registrations ADD COLUMN IF NOT EXISTS reg_type TEXT NOT NULL DEFAULT 'Resident';
+ALTER TABLE registrations ADD COLUMN IF NOT EXISTS committee_name TEXT;
+ALTER TABLE registrations ADD COLUMN IF NOT EXISTS org_name TEXT;
+ALTER TABLE registrations ADD COLUMN IF NOT EXISTS notes TEXT;
+
+-- A Sponsor entry has no real flat, so flat can no longer be mandatory at the database level
+-- (the public registration form still enforces it via VALID_FLATS for actual residents - this
+-- only relaxes the column so the admin-only Sponsor path can leave it blank).
+ALTER TABLE registrations ALTER COLUMN flat DROP NOT NULL;
 `;
 
 // Sized for a maximum expected turnout of ~400 people: 4 slots x 110 capacity = 440, with
