@@ -21,7 +21,7 @@
   .card{background:#fff;border-radius:14px;padding:18px;margin-bottom:16px;box-shadow:0 2px 10px rgba(0,0,0,.08);border:1px solid #eee;}
   .card h2{margin:0 0 12px;font-size:17px;color:var(--leaf-dark);border-bottom:2px solid var(--gold);padding-bottom:6px;}
   label{display:block;font-size:13px;font-weight:600;margin:10px 0 4px;color:#555;}
-  input[type=text],input[type=password]{width:100%;padding:10px 12px;border:1.5px solid #ddd;border-radius:8px;font-size:15px;font-family:inherit;}
+  input[type=text],input[type=password],input[type=tel]{width:100%;padding:10px 12px;border:1.5px solid #ddd;border-radius:8px;font-size:15px;font-family:inherit;}
   button{cursor:pointer;border:none;border-radius:8px;font-family:inherit;font-weight:600;font-size:13px;padding:9px 14px;}
   .btn-primary{background:var(--leaf);color:#fff;width:100%;margin-top:14px;}
   .btn-secondary{background:#eee;color:#333;margin-top:8px;}
@@ -73,6 +73,9 @@
   .name-row input{flex:1;}
   .name-row .btn-remove{background:#FDECEA;color:#8E1B1B;padding:8px 10px;flex:0 0 auto;}
   .btn-add-name{background:#eee;color:#333;width:100%;margin-top:2px;margin-bottom:12px;}
+  .total-box{background:linear-gradient(90deg,var(--gold),#FFD75E);border-radius:12px;padding:14px;text-align:center;margin-top:10px;}
+  .total-box .amt{font-size:24px;font-weight:800;color:var(--maroon);}
+  .total-box .brk{font-size:11px;color:#5a3d00;margin-top:2px;}
   .edit-section-label{font-size:12px;font-weight:700;color:#555;margin-top:14px;}
   .danger-zone{border:1.5px dashed var(--maroon);border-radius:10px;padding:12px;margin-top:16px;}
   .danger-zone p{font-size:12px;color:#8E1B1B;margin:0 0 8px;}
@@ -159,8 +162,55 @@
 
     <div class="card" id="awaitingShareCard" style="border:2px solid #d98c00;">
       <h2>🔔 Awaiting Coupon Share <span class="pill pending" id="awaitingShareCountBadge">0</span></h2>
-      <p style="font-size:12px;color:#8a7a4d;margin:0 0 10px;">Confirmed families whose coupons haven't been marked as shared yet - newest first, so nobody gets lost once the Confirmed list grows long.</p>
+      <p style="font-size:12px;color:#8a7a4d;margin:0 0 10px;">Confirmed resident families whose coupons haven't been marked as shared yet - newest first, so nobody gets lost once the Confirmed list grows long.</p>
       <div id="awaitingShareList"></div>
+    </div>
+
+    <div class="card" id="sponsorShareCard" style="border:2px solid #0d6ea8;">
+      <h2>📱 Artist / Sponsor Coupons <span class="pill pending" id="sponsorShareCountBadge">0</span></h2>
+      <p style="font-size:12px;color:#8a7a4d;margin:0 0 10px;">Grouped by committee SPOC, so every group that person is coordinating goes out in a single WhatsApp message instead of one per group.</p>
+      <div id="sponsorShareList"></div>
+    </div>
+
+    <div class="card" id="addSponsorCard">
+      <h2>+ Add Artist / Sponsor Registration</h2>
+      <p style="font-size:12px;color:#8a7a4d;margin:0 0 10px;">For coupons requested by a committee on behalf of an artist, performer, or sponsor - payment is settled later by the treasurer, not collected here. This does not appear on the public registration page.</p>
+
+      <label>Committee Name</label>
+      <input type="text" id="spCommittee" placeholder="e.g. Cultural Committee">
+
+      <div style="display:flex;gap:10px;">
+        <div style="flex:1;">
+          <label>SPOC Name</label>
+          <input type="text" id="spSpocName" placeholder="e.g. Anu George">
+        </div>
+        <div style="flex:1;">
+          <label>SPOC WhatsApp Number</label>
+          <input type="tel" id="spSpocPhone" placeholder="10-digit mobile number" maxlength="10" oninput="this.value=this.value.replace(/\D/g,'').slice(0,10)">
+        </div>
+      </div>
+
+      <label>Group / Artist / Sponsor Name</label>
+      <input type="text" id="spOrgName" placeholder="e.g. Kerala Arts Troupe">
+
+      <label style="margin-top:16px;">Adults (₹450 each)</label>
+      <div id="spAdultsList"></div>
+      <button type="button" class="btn-add-name" onclick="addSponsorPerson('adults')">+ Add Adult</button>
+
+      <label style="margin-top:16px;">Kids (optional, ₹250 each)</label>
+      <div id="spKidsList"></div>
+      <button type="button" class="btn-add-name" onclick="addSponsorPerson('kids')">+ Add Kid</button>
+
+      <label style="margin-top:16px;">Notes (optional)</label>
+      <input type="text" id="spNotes" placeholder="e.g. Stage performance, arriving 11:30 AM">
+
+      <div class="total-box">
+        <div class="amt">₹<span id="spTotalAmt">0</span></div>
+        <div class="brk" id="spTotalBrk">0 adults, 0 kids &middot; settled by treasurer, not paid via UPI</div>
+      </div>
+
+      <button class="btn-primary" onclick="submitSponsorRegistration()">Save Registration (goes to Pending)</button>
+      <div class="msg" id="spMsg"></div>
     </div>
 
     <div class="card">
@@ -231,23 +281,38 @@
       <div id="manageForm" class="hidden">
         <div class="edit-section-label">Reg ID: <span id="mRegId"></span> &middot; Status: <span id="mStatus"></span></div>
 
-        <label>Flat Number</label>
-        <input type="text" id="mFlat">
-        <label>Phase</label>
-        <select class="mgr-select" id="mPhase">
-          <option value="PH1">PH1</option>
-          <option value="PH2">PH2</option>
-        </select>
-        <label>Tower</label>
-        <select class="mgr-select" id="mTower">
-          <option value="Tower A">Tower A</option>
-          <option value="Tower B">Tower B</option>
-          <option value="Tower C">Tower C</option>
-        </select>
-        <label>Primary Contact Name</label>
-        <input type="text" id="mContact">
-        <label>WhatsApp / Phone Number</label>
-        <input type="text" id="mPhone">
+        <div id="mResidentFields">
+          <label>Flat Number</label>
+          <input type="text" id="mFlat">
+          <label>Phase</label>
+          <select class="mgr-select" id="mPhase">
+            <option value="PH1">PH1</option>
+            <option value="PH2">PH2</option>
+          </select>
+          <label>Tower</label>
+          <select class="mgr-select" id="mTower">
+            <option value="Tower A">Tower A</option>
+            <option value="Tower B">Tower B</option>
+            <option value="Tower C">Tower C</option>
+          </select>
+          <label>Primary Contact Name</label>
+          <input type="text" id="mContact">
+          <label>WhatsApp / Phone Number</label>
+          <input type="text" id="mPhone">
+        </div>
+
+        <div id="mSponsorFields" class="hidden">
+          <label>Committee Name</label>
+          <input type="text" id="mCommittee">
+          <label>SPOC Name</label>
+          <input type="text" id="mSpocName">
+          <label>SPOC WhatsApp Number</label>
+          <input type="text" id="mSpocPhone">
+          <label>Group / Artist / Sponsor Name</label>
+          <input type="text" id="mOrgName">
+          <label>Notes</label>
+          <input type="text" id="mNotes">
+        </div>
 
         <p style="font-size:12px;color:#8a7a4d;margin:10px 0 0;">You can fix a name spelling below, but the number of adults/kids can't be changed here - it's locked to what was originally paid for. To add or remove a person, delete this registration and have the family submit a fresh one.</p>
         <div class="edit-section-label">Adults</div>
@@ -507,6 +572,7 @@
       loadRegistrations();
       loadRevenue();
       loadDeletedRegistrations();
+      renderSponsorPersons();
     }catch(err){
       showMsg('pinMsg', 'Error: ' + err.message, 'err');
     }
@@ -515,6 +581,7 @@
   function applyReadOnlyMode(){
     if(!IS_READONLY) return;
     document.getElementById('manageCard').classList.add('hidden');
+    document.getElementById('addSponsorCard').classList.add('hidden');
     var badge = document.getElementById('whoBadge');
     var tag = document.createElement('span');
     tag.style.cssText = 'background:#FFF3CD;color:#8a6d00;padding:2px 8px;border-radius:10px;font-size:11px;margin-left:6px;font-weight:700;';
@@ -552,6 +619,8 @@
     if(!res.success) return;
     document.getElementById('revenueStatRow').innerHTML =
       stat('₹' + res.confirmedRevenue, 'Confirmed Revenue') +
+      stat('₹' + res.residentRevenue, 'Collected from Residents') +
+      stat('₹' + res.sponsorOwedRevenue, 'Owed by Treasurer (Artist/Sponsor)') +
       stat('₹' + res.pendingRevenue, 'Pending Revenue') +
       stat('₹' + res.refundsOwedTotal, 'Refunds Owed') +
       stat('₹' + res.netRevenue, 'Net Revenue') +
@@ -672,6 +741,8 @@
       (r.phone||'').toLowerCase().indexOf(q) > -1 ||
       (r.regId||'').toLowerCase().indexOf(q) > -1 ||
       (r.tower||'').toLowerCase().indexOf(q) > -1 ||
+      (r.committeeName||'').toLowerCase().indexOf(q) > -1 ||
+      (r.orgName||'').toLowerCase().indexOf(q) > -1 ||
       (r.adults||[]).some(function(n){ return (n||'').toLowerCase().indexOf(q) > -1; }) ||
       (r.kids||[]).some(function(n){ return (n||'').toLowerCase().indexOf(q) > -1; });
   }
@@ -694,11 +765,13 @@
       stat(totalAdults + totalKids, 'Total People') +
       stat('₹' + totalRevenue, 'Revenue Confirmed');
 
-    // Confirmed-but-not-yet-shared, newest confirmation first - this is the list an admin should
-    // check right after confirming a payment, instead of hunting through the full Confirmed
-    // Registrations list below for the one they just added.
+    // Confirmed-but-not-yet-shared resident families, newest confirmation first - this is the
+    // list an admin should check right after confirming a payment, instead of hunting through
+    // the full Confirmed Registrations list below for the one they just added. Sponsor entries
+    // are excluded here - they get their own SPOC-grouped section instead (see below), since
+    // sharing for those happens in bulk, not one registration at a time.
     var awaitingShare = confirmed
-      .filter(function(r){ return !r.couponShared; })
+      .filter(function(r){ return r.regType !== 'Sponsor' && !r.couponShared; })
       .sort(function(a, b){ return new Date(b.confirmedAt || 0) - new Date(a.confirmedAt || 0); });
 
     document.getElementById('pendingCountBadge').innerText = pending.length;
@@ -709,6 +782,8 @@
     document.getElementById('awaitingShareList').innerHTML = awaitingShare.length
       ? awaitingShare.map(renderConfirmedRow).join('')
       : '<div class="empty-note">' + (q ? 'No matches.' : 'All caught up — every confirmed family has had coupons shared.') + '</div>';
+
+    renderSponsorShareSection(confirmed.filter(function(r){ return r.regType === 'Sponsor'; }));
 
     document.getElementById('pendingList').innerHTML = pending.length
       ? pending.map(renderPendingRow).join('')
@@ -736,20 +811,41 @@
     return '<a class="phone-link" href="tel:+' + phone + '">' + phone + '</a>';
   }
 
+  // Sponsor entries have no flat/phase/tower - this shows the group/org name + committee/SPOC
+  // instead, so both types render sensibly from the same row templates.
+  function sponsorTag(r){
+    return r.regType === 'Sponsor' ? '<span class="tower-tag" style="background:#e9e2ff;color:#4a3aa8;">Artist/Sponsor</span>' : '';
+  }
+  function identityLine(r){
+    if(r.regType === 'Sponsor'){
+      return escapeHtml(r.orgName || r.regId) + sponsorTag(r) +
+        ' — ' + escapeHtml(r.committeeName || 'Committee') + ' SPOC: ' + escapeHtml(r.contact);
+    }
+    return escapeHtml(r.flat) + phaseTag(r) + towerTag(r) + ' — ' + escapeHtml(r.contact);
+  }
+  function notesLine(r){
+    return r.regType === 'Sponsor' && r.notes
+      ? '<div class="reg-people" style="margin-top:4px;">Notes: ' + escapeHtml(r.notes) + '</div>'
+      : '';
+  }
+
   function renderPendingRow(r, i){
+    var isSponsor = r.regType === 'Sponsor';
+    var confirmLabel = isSponsor ? '✓ Approve (Treasurer will settle) &amp; Generate Coupons' : '✓ Confirm Payment &amp; Generate Coupons';
     var actions = IS_READONLY ? '' :
       '<div class="reg-actions">' +
-      '<button class="btn-confirm" onclick="confirmPayment(\'' + r.regId + '\')">✓ Confirm Payment &amp; Generate Coupons</button>' +
+      '<button class="btn-confirm" onclick="confirmPayment(\'' + r.regId + '\')">' + confirmLabel + '</button>' +
       '<button class="btn-manage" onclick="manageReg(\'' + r.regId + '\')">✎ Manage</button>' +
       '<button class="btn-reject" onclick="rejectReg(\'' + r.regId + '\')">✕ Reject</button>' +
       '</div>';
     return '<div class="reg-card">' +
       '<div class="reg-head"><div><span class="sno">' + (i+1) + '</span>' +
-      '<span class="reg-id">' + r.regId + '</span> — ' + escapeHtml(r.flat) + phaseTag(r) + towerTag(r) + ' — ' + escapeHtml(r.contact) + '</div>' +
+      '<span class="reg-id">' + r.regId + '</span> — ' + identityLine(r) + '</div>' +
       '<span class="pill pending">Pending</span></div>' +
       '<div class="reg-contact" style="margin-top:4px;">' + phoneLink(r.phone) + ' &middot; ₹' + r.total +
       (r.txnRef ? (' &middot; Ref: ' + escapeHtml(r.txnRef)) : '') + '</div>' +
       '<div class="reg-people">Adults: ' + ((r.adults||[]).join(', ') || '—') + '<br>Kids: ' + ((r.kids||[]).join(', ') || '—') + '</div>' +
+      notesLine(r) +
       actions + '</div>';
   }
 
@@ -774,26 +870,42 @@
   }
 
   function renderConfirmedRow(r, i){
+    var isSponsor = r.regType === 'Sponsor';
     var chips = (r.coupons||[]).map(couponRowChip).join('');
     var sharePill = r.couponShared
       ? '<span class="pill confirmed" title="Marked shared on ' + escapeHtml(fmtDateShort(r.couponSharedAt)) + '">✓ Shared</span>'
       : '<span class="pill pending">Not shared yet</span>';
-    var actions = IS_READONLY ? '' :
-      '<div class="reg-actions">' +
-      '<button class="btn-wa" onclick="shareCoupons(\'' + r.regId + '\')">📱 Share Coupons on WhatsApp</button>' +
-      '<button class="btn-secondary" onclick="shareReminder(\'' + r.regId + '\')">⏰ Send Slot Reminder</button>' +
-      '<button class="btn-manage" onclick="manageReg(\'' + r.regId + '\')">✎ Manage</button>' +
-      (r.couponShared
-        ? '<button class="btn-secondary" onclick="toggleCouponShared(\'' + r.regId + '\', false)" title="Undo if this was marked shared by mistake">↺ Mark Not Shared</button>'
-        : '<button class="btn-secondary" onclick="toggleCouponShared(\'' + r.regId + '\', true)" title="Use this if coupons were already shared some other way (e.g. in person)">✓ Mark as Shared</button>') +
-      '</div>';
+    var actions;
+    if(IS_READONLY){
+      actions = '';
+    } else if(isSponsor){
+      // Sponsor coupons are shared in bulk per SPOC from the "Artist/Sponsor Coupons" section
+      // above, not one-by-one here - this just keeps a manual override available in case the
+      // bulk send needs correcting.
+      actions = '<div class="reg-actions">' +
+        '<button class="btn-manage" onclick="manageReg(\'' + r.regId + '\')">✎ Manage</button>' +
+        (r.couponShared
+          ? '<button class="btn-secondary" onclick="toggleCouponShared(\'' + r.regId + '\', false)" title="Undo if this was marked shared by mistake">↺ Mark Not Shared</button>'
+          : '<button class="btn-secondary" onclick="toggleCouponShared(\'' + r.regId + '\', true)" title="Use this if coupons were already shared some other way">✓ Mark as Shared</button>') +
+        '</div>';
+    } else {
+      actions = '<div class="reg-actions">' +
+        '<button class="btn-wa" onclick="shareCoupons(\'' + r.regId + '\')">📱 Share Coupons on WhatsApp</button>' +
+        '<button class="btn-secondary" onclick="shareReminder(\'' + r.regId + '\')">⏰ Send Slot Reminder</button>' +
+        '<button class="btn-manage" onclick="manageReg(\'' + r.regId + '\')">✎ Manage</button>' +
+        (r.couponShared
+          ? '<button class="btn-secondary" onclick="toggleCouponShared(\'' + r.regId + '\', false)" title="Undo if this was marked shared by mistake">↺ Mark Not Shared</button>'
+          : '<button class="btn-secondary" onclick="toggleCouponShared(\'' + r.regId + '\', true)" title="Use this if coupons were already shared some other way (e.g. in person)">✓ Mark as Shared</button>') +
+        '</div>';
+    }
     return '<div class="reg-card">' +
       '<div class="reg-head"><div><span class="sno">' + (i+1) + '</span>' +
-      '<span class="reg-id">' + r.regId + '</span> — ' + escapeHtml(r.flat) + phaseTag(r) + towerTag(r) + ' — ' + escapeHtml(r.contact) + '</div>' +
+      '<span class="reg-id">' + r.regId + '</span> — ' + identityLine(r) + '</div>' +
       '<span class="pill confirmed">Confirmed</span></div>' +
       '<div class="reg-contact" style="margin-top:4px;">' + phoneLink(r.phone) + ' &middot; ₹' + r.total +
       (r.confirmedBy ? (' &middot; Confirmed by ' + escapeHtml(r.confirmedBy)) : '') + ' &middot; ' + sharePill + '</div>' +
       '<div class="reg-people">Adults: ' + ((r.adults||[]).join(', ') || '—') + '<br>Kids: ' + ((r.kids||[]).join(', ') || '—') + '</div>' +
+      notesLine(r) +
       '<div class="coupon-chips">' + (chips || '<span class="empty-note">No coupons found</span>') + '</div>' +
       actions + '</div>';
   }
@@ -806,7 +918,7 @@
       '</div>';
     return '<div class="reg-card">' +
       '<div class="reg-head"><div><span class="sno">' + (i+1) + '</span>' +
-      '<span class="reg-id">' + r.regId + '</span> — ' + escapeHtml(r.flat) + phaseTag(r) + towerTag(r) + ' — ' + escapeHtml(r.contact) + '</div>' +
+      '<span class="reg-id">' + r.regId + '</span> — ' + identityLine(r) + '</div>' +
       '<span class="pill rejected">Rejected</span></div>' +
       '<div class="reg-contact" style="margin-top:4px;">' + phoneLink(r.phone) + ' &middot; ₹' + r.total + '</div>' +
       '<div class="reg-people">Adults: ' + ((r.adults||[]).join(', ') || '—') + '<br>Kids: ' + ((r.kids||[]).join(', ') || '—') + '</div>' +
@@ -816,13 +928,142 @@
   }
 
   async function confirmPayment(regId){
-    if(!confirm('Confirm payment received for ' + regId + '? This will generate individual coupons.')) return;
+    var reg = ALL_REGS.find(function(r){ return r.regId === regId; });
+    var isSponsor = reg && reg.regType === 'Sponsor';
+    var confirmMsg = isSponsor
+      ? 'Approve ' + regId + '? This will generate individual coupons (payment settled later by the treasurer).'
+      : 'Confirm payment received for ' + regId + '? This will generate individual coupons.';
+    if(!confirm(confirmMsg)) return;
     try{
       var res = await api('POST', '/api/admin/confirm', { regId: regId, pin: PIN });
       if(!res.success){ alert(res.message); return; }
       await refreshAll();
-      shareCoupons(regId);
+      // Resident coupons auto-open a WhatsApp share right away. Sponsor coupons deliberately
+      // don't - they go out later as one combined message per SPOC from the Artist/Sponsor
+      // Coupons section, not one message per group.
+      if(!isSponsor) shareCoupons(regId);
     }catch(err){ alert('Error: ' + err.message); }
+  }
+
+  // ============== ARTIST / SPONSOR COUPONS (grouped by SPOC) ==============
+  // One SPOC can be the contact for several separate approved groups (e.g. 3 different
+  // sponsors, all coordinated by the same committee person) - this groups them by phone number
+  // so the admin sends ONE combined WhatsApp message per SPOC instead of one per group.
+  function renderSponsorShareSection(sponsorConfirmed){
+    var groups = {};
+    sponsorConfirmed.forEach(function(r){
+      var key = r.phone || '';
+      if(!groups[key]) groups[key] = { phone: key, spocName: r.contact, committeeName: r.committeeName, entries: [] };
+      groups[key].entries.push(r);
+    });
+    var list = Object.values(groups).sort(function(a, b){
+      var aLatest = Math.max.apply(null, a.entries.map(function(r){ return new Date(r.confirmedAt || 0).getTime(); }));
+      var bLatest = Math.max.apply(null, b.entries.map(function(r){ return new Date(r.confirmedAt || 0).getTime(); }));
+      return bLatest - aLatest;
+    });
+    document.getElementById('sponsorShareCountBadge').innerText = list.length;
+    document.getElementById('sponsorShareList').innerHTML = list.length
+      ? list.map(renderSponsorGroupCard).join('')
+      : '<div class="empty-note">No approved Artist/Sponsor entries yet.</div>';
+  }
+
+  function renderSponsorGroupCard(g){
+    var totalCoupons = g.entries.reduce(function(s, r){ return s + (r.coupons||[]).length; }, 0);
+    var sharedCount = g.entries.filter(function(r){ return r.couponShared; }).length;
+    var chips = g.entries.map(function(r){
+      return '<span class="chip">' + escapeHtml(r.orgName || r.regId) + ' &middot; ' + (r.coupons||[]).length + ' coupon(s)' +
+        (r.couponShared ? ' ✓' : '') + '</span>';
+    }).join('');
+    var shareBtn = IS_READONLY ? '' :
+      '<button class="btn-wa" style="width:100%;margin-top:10px;" onclick="shareSponsorCoupons(\'' + g.phone + '\')">📱 Share All ' + totalCoupons + ' Coupon(s) to ' + escapeHtml(g.spocName) + '</button>';
+    return '<div class="reg-card">' +
+      '<div class="reg-head"><div><span class="reg-id">' + escapeHtml(g.spocName) + '</span> &middot; ' + escapeHtml(g.committeeName || 'Committee') + '</div>' +
+      '<span class="pill ' + (sharedCount === g.entries.length ? 'confirmed' : 'pending') + '">' + sharedCount + '/' + g.entries.length + ' shared</span></div>' +
+      '<div class="reg-contact" style="margin-top:4px;">' + phoneLink(g.phone) + '</div>' +
+      '<div class="coupon-chips">' + chips + '</div>' +
+      shareBtn + '</div>';
+  }
+
+  async function shareSponsorCoupons(spocPhone){
+    try{
+      var res = await api('GET', '/api/admin/share-sponsor-coupons?spocPhone=' + encodeURIComponent(spocPhone) + '&pin=' + encodeURIComponent(PIN));
+      if(!res.success){ alert(res.message); return; }
+      var win = window.open(res.waUrl, '_blank');
+      if(!win){
+        alert('Your browser blocked the WhatsApp share window. Please allow pop-ups for this site, then try again.');
+        return;
+      }
+      for(var i = 0; i < res.regIds.length; i++){
+        await api('POST', '/api/admin/mark-coupon-shared', { pin: PIN, regId: res.regIds[i], shared: true });
+      }
+      await refreshAll();
+    }catch(err){ alert('Error: ' + err.message); }
+  }
+
+  // ============== ADD ARTIST / SPONSOR REGISTRATION ==============
+  var SP_ADULTS = [''];
+  var SP_KIDS = [];
+
+  function renderSponsorPersons(){
+    function renderList(containerId, arr, placeholder, kind){
+      var html = '';
+      arr.forEach(function(v, i){
+        html += '<div class="name-row">' +
+          '<input type="text" placeholder="' + placeholder + '" value="' + escapeHtml(v) + '" oninput="SP_' + kind.toUpperCase() + '[' + i + ']=this.value;updateSponsorTotal();">' +
+          '<button type="button" class="btn-remove" onclick="removeSponsorPerson(\'' + kind + '\',' + i + ')">&times;</button></div>';
+      });
+      document.getElementById(containerId).innerHTML = html;
+    }
+    renderList('spAdultsList', SP_ADULTS, 'Adult name', 'adults');
+    renderList('spKidsList', SP_KIDS, 'Kid name', 'kids');
+    updateSponsorTotal();
+  }
+
+  function addSponsorPerson(kind){
+    if(kind === 'adults') SP_ADULTS.push(''); else SP_KIDS.push('');
+    renderSponsorPersons();
+  }
+
+  function removeSponsorPerson(kind, idx){
+    if(kind === 'adults') SP_ADULTS.splice(idx, 1); else SP_KIDS.splice(idx, 1);
+    renderSponsorPersons();
+  }
+
+  function updateSponsorTotal(){
+    var adults = SP_ADULTS.filter(function(n){ return (n||'').trim(); }).length;
+    var kids = SP_KIDS.filter(function(n){ return (n||'').trim(); }).length;
+    var total = adults * 450 + kids * 250;
+    document.getElementById('spTotalAmt').innerText = total;
+    document.getElementById('spTotalBrk').innerText = adults + ' adults, ' + kids + ' kids · settled by treasurer, not paid via UPI';
+  }
+
+  async function submitSponsorRegistration(){
+    var msgEl = document.getElementById('spMsg');
+    var payload = {
+      pin: PIN,
+      committeeName: document.getElementById('spCommittee').value.trim(),
+      spocName: document.getElementById('spSpocName').value.trim(),
+      spocPhone: document.getElementById('spSpocPhone').value.trim(),
+      orgName: document.getElementById('spOrgName').value.trim(),
+      notes: document.getElementById('spNotes').value.trim(),
+      adults: SP_ADULTS.filter(function(n){ return (n||'').trim(); }),
+      kids: SP_KIDS.filter(function(n){ return (n||'').trim(); })
+    };
+    try{
+      var res = await api('POST', '/api/admin/add-sponsor-registration', payload);
+      if(!res.success){ msgEl.className = 'msg err'; msgEl.innerText = res.message; return; }
+      msgEl.className = 'msg ok';
+      msgEl.innerText = 'Saved as ' + res.regId + ' (Pending) — ₹' + res.total + '. Find it in Pending Registrations to approve.';
+      document.getElementById('spCommittee').value = '';
+      document.getElementById('spSpocName').value = '';
+      document.getElementById('spSpocPhone').value = '';
+      document.getElementById('spOrgName').value = '';
+      document.getElementById('spNotes').value = '';
+      SP_ADULTS = [''];
+      SP_KIDS = [];
+      renderSponsorPersons();
+      await refreshAll();
+    }catch(err){ msgEl.className = 'msg err'; msgEl.innerText = 'Error: ' + err.message; }
   }
 
   async function rejectReg(regId){
@@ -940,11 +1181,22 @@
     MANAGED_REG = match;
     document.getElementById('mRegId').innerText = match.regId;
     document.getElementById('mStatus').innerText = match.status;
-    document.getElementById('mFlat').value = match.flat || '';
-    document.getElementById('mPhase').value = match.phase || 'PH1';
-    document.getElementById('mTower').value = match.tower || 'Tower A';
-    document.getElementById('mContact').value = match.contact || '';
-    document.getElementById('mPhone').value = match.phone || '';
+    var isSponsor = match.regType === 'Sponsor';
+    document.getElementById('mResidentFields').classList.toggle('hidden', isSponsor);
+    document.getElementById('mSponsorFields').classList.toggle('hidden', !isSponsor);
+    if(isSponsor){
+      document.getElementById('mCommittee').value = match.committeeName || '';
+      document.getElementById('mSpocName').value = match.contact || '';
+      document.getElementById('mSpocPhone').value = match.phone || '';
+      document.getElementById('mOrgName').value = match.orgName || '';
+      document.getElementById('mNotes').value = match.notes || '';
+    } else {
+      document.getElementById('mFlat').value = match.flat || '';
+      document.getElementById('mPhase').value = match.phase || 'PH1';
+      document.getElementById('mTower').value = match.tower || 'Tower A';
+      document.getElementById('mContact').value = match.contact || '';
+      document.getElementById('mPhone').value = match.phone || '';
+    }
     renderNameFields('mAdults', match.adults || [], 'Adult name');
     renderNameFields('mKids', match.kids || [], 'Kid name');
     document.getElementById('manageForm').classList.remove('hidden');
@@ -980,7 +1232,18 @@
   async function saveManageForm(){
     if(!MANAGED_REG) return;
     var msgEl = document.getElementById('manageSaveMsg');
-    var payload = {
+    var isSponsor = MANAGED_REG.regType === 'Sponsor';
+    var payload = isSponsor ? {
+      pin: PIN,
+      regId: MANAGED_REG.regId,
+      committeeName: document.getElementById('mCommittee').value.trim(),
+      spocName: document.getElementById('mSpocName').value.trim(),
+      spocPhone: document.getElementById('mSpocPhone').value.trim(),
+      orgName: document.getElementById('mOrgName').value.trim(),
+      notes: document.getElementById('mNotes').value.trim(),
+      adults: collectNames('mAdults'),
+      kids: collectNames('mKids')
+    } : {
       pin: PIN,
       regId: MANAGED_REG.regId,
       flat: document.getElementById('mFlat').value.trim(),
