@@ -251,6 +251,50 @@ app.post('/api/register', async (req, res) => {
   }
 });
 
+// Lets the committee log a complimentary Artist/Sponsor entry directly (admin-only - there is no
+// public link for this). Skips flat/phase/tower and the DSRWW whitelist entirely, since these
+// groups don't live in the community; the committee SPOC's own name/number goes into
+// contact/phone instead, since that's who ends up receiving the coupons on WhatsApp. Lands in
+// Pending exactly like a resident registration, so it still goes through a deliberate approval
+// step before coupons exist.
+app.post('/api/admin/add-sponsor-registration', async (req, res) => {
+  const access = requireWriteAccess((req.body || {}).pin);
+  if (!access.ok) return res.json({ success: false, message: access.message });
+  try {
+    const body = req.body || {};
+    const committeeName = (body.committeeName || '').trim();
+    const spocName = (body.spocName || '').trim();
+    const spocPhone = normalizePhone(body.spocPhone);
+    const orgName = (body.orgName || '').trim();
+    const notes = (body.notes || '').trim();
+    const adults = (body.adults || []).map(n => (n || '').trim()).filter(Boolean);
+    const kids = (body.kids || []).map(n => (n || '').trim()).filter(Boolean);
+
+    if (!committeeName) return res.json({ success: false, message: 'Please enter the committee name' });
+    if (!spocName) return res.json({ success: false, message: 'Please enter the SPOC name' });
+    if (!/^91[6-9]\d{9}$/.test(spocPhone)) return res.json({ success: false, message: 'Please enter a valid 10-digit SPOC WhatsApp number (starting 6-9)' });
+    if (!orgName) return res.json({ success: false, message: 'Please enter the group / artist / sponsor name' });
+    if (adults.length === 0 && kids.length === 0) return res.json({ success: false, message: 'Please add at least one adult or kid' });
+
+    const total = adults.length * CFG.adultPrice + kids.length * CFG.kidPrice;
+    const id = await nextSeq('registrations_id_seq');
+    const regId = 'REG-' + pad3(id);
+
+    await pool.query(
+      `INSERT INTO registrations
+       (id, reg_id, flat, phase, tower, contact, phone, adult_names, kid_names, adult_count, kid_count, total, status, reg_type, committee_name, org_name, notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'Pending','Sponsor',$13,$14,$15)`,
+      [id, regId, null, '', '', spocName, spocPhone, JSON.stringify(adults), JSON.stringify(kids),
+        adults.length, kids.length, total, committeeName, orgName, notes]
+    );
+
+    res.json({ success: true, regId, total });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Server error: ' + err.message });
+  }
+});
+
 app.post('/api/lookup', async (req, res) => {
   try {
     const phone = normalizePhone((req.body || {}).phone);
@@ -341,6 +385,7 @@ app.get('/api/admin/registrations', async (req, res) => {
         confirmedBy: row.confirmed_by, confirmedAt: row.confirmed_at,
         rejectedReason: row.rejected_reason, rejectedBy: row.rejected_by, rejectedAt: row.rejected_at,
         couponShared: row.coupon_shared, couponSharedAt: row.coupon_shared_at,
+        regType: row.reg_type || 'Resident', committeeName: row.committee_name || '', orgName: row.org_name || '', notes: row.notes || '',
         coupons
       };
     });
@@ -450,6 +495,50 @@ app.get('/api/admin/share-coupons', async (req, res) => {
     msg += 'Onam Ashamsakal!\n';
     msg += 'Team Aaravam 2026';
     res.json({ success: true, waUrl: buildWhatsAppLink(reg.phone, msg), phone: reg.phone });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Server error: ' + err.message });
+  }
+});
+
+// A single committee SPOC can be the contact for several separate Artist/Sponsor entries (e.g.
+// one dance troupe, one sponsor org, all coordinated through the same person) - rather than
+// sending them several separate WhatsApp messages, this gathers every Confirmed Sponsor-type
+// registration under that SPOC's number into ONE combined message, grouped by group/org name.
+// Returns every regId included, so the caller can mark all of them shared together.
+app.get('/api/admin/share-sponsor-coupons', async (req, res) => {
+  const access = requireWriteAccess(req.query.pin);
+  if (!access.ok) return res.json({ success: false, message: access.message });
+  try {
+    const spocPhone = normalizePhone(req.query.spocPhone);
+    const regR = await pool.query(
+      `SELECT * FROM registrations WHERE reg_type='Sponsor' AND status='Confirmed' AND phone=$1 ORDER BY id ASC`,
+      [spocPhone]
+    );
+    if (!regR.rows.length) return res.json({ success: false, message: 'No confirmed Artist/Sponsor coupons found for this SPOC number' });
+
+    let msg = '*** Onam Ashamsakal! ***\n';
+    msg += 'Sadhya entry coupons for the following group(s) are ready:\n\n';
+    const regIds = [];
+    let couponCount = 0;
+    for (const reg of regR.rows) {
+      const coupons = await getCouponsForReg(reg.reg_id, baseUrl(req));
+      if (!coupons.length) continue;
+      regIds.push(reg.reg_id);
+      couponCount += coupons.length;
+      msg += '*' + (reg.org_name || reg.reg_id) + '*\n';
+      coupons.forEach((c, i) => { msg += (i + 1) + '. ' + c.name + ' (' + c.type + ')\n' + c.url + '\n'; });
+      msg += '\n';
+    }
+    if (!regIds.length) return res.json({ success: false, message: 'No coupons generated yet for this SPOC' });
+    msg += 'Steps to follow (each person opens their own link):\n';
+    msg += '1. Open the respective coupon link\n';
+    msg += '2. Select the preferred entry slot to reserve the seat\n';
+    msg += '3. Download a copy of the coupon to the device (only after selecting the preferred slot) — this is mandatory and required for entry\n\n';
+    msg += 'Kindly complete this before slots fill up — Onam waits for no one!\n\n';
+    msg += 'Onam Ashamsakal!\n';
+    msg += 'Team Aaravam 2026';
+    res.json({ success: true, waUrl: buildWhatsAppLink(spocPhone, msg), regIds, couponCount });
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, message: 'Server error: ' + err.message });
@@ -639,21 +728,47 @@ app.post('/api/admin/update-registration', async (req, res) => {
   try {
     const body = req.body || {};
     const regId = body.regId;
-    const flat = normalizeFlat(body.flat);
-    const phase = (body.phase || '').trim().toUpperCase();
-    const tower = (body.tower || '').trim();
-    const contact = (body.contact || '').trim();
-    const phone = normalizePhone(body.phone);
+
+    // Which fields are required/validated depends on the registration's actual type - looked up
+    // from the database, never trusted from the request body, so nobody could switch a Resident
+    // entry into skipping the flat whitelist by just sending reg_type in the payload. A Sponsor
+    // entry has no real flat/phase/tower to validate; a Resident entry has no committee/SPOC/org
+    // fields to save.
+    const typeR = await client.query('SELECT reg_type FROM registrations WHERE reg_id = $1', [regId]);
+    if (!typeR.rows.length) { client.release(); return res.json({ success: false, message: 'Registration not found' }); }
+    const isSponsor = typeR.rows[0].reg_type === 'Sponsor';
+
     const newAdults = (body.adults || []).map(n => (n || '').trim()).filter(Boolean);
     const newKids = (body.kids || []).map(n => (n || '').trim()).filter(Boolean);
-
-    if (!flat) { client.release(); return res.json({ success: false, message: 'Flat number is required' }); }
-    if (phase !== 'PH1' && phase !== 'PH2') { client.release(); return res.json({ success: false, message: 'Please select a Phase' }); }
-    if (!TOWER_OPTIONS.includes(tower)) { client.release(); return res.json({ success: false, message: 'Please select a Tower' }); }
-    if (!isValidFlat(phase, tower, flat)) { client.release(); return res.json({ success: false, message: 'This is not a valid DSRWW flat number for the selected Phase/Tower. Please check and re-enter.' }); }
-    if (!contact) { client.release(); return res.json({ success: false, message: 'Contact name is required' }); }
-    if (!/^91[6-9]\d{9}$/.test(phone)) { client.release(); return res.json({ success: false, message: 'Please enter a valid 10-digit mobile number (starting 6-9)' }); }
     if (newAdults.length === 0 && newKids.length === 0) { client.release(); return res.json({ success: false, message: 'At least one adult or kid is required' }); }
+
+    let flat = null, phase = '', tower = '';
+    let committeeName = '', orgName = '', notes = '';
+    let contact, phone;
+
+    if (isSponsor) {
+      committeeName = (body.committeeName || '').trim();
+      contact = (body.spocName || '').trim();
+      phone = normalizePhone(body.spocPhone);
+      orgName = (body.orgName || '').trim();
+      notes = (body.notes || '').trim();
+      if (!committeeName) { client.release(); return res.json({ success: false, message: 'Please enter the committee name' }); }
+      if (!contact) { client.release(); return res.json({ success: false, message: 'Please enter the SPOC name' }); }
+      if (!/^91[6-9]\d{9}$/.test(phone)) { client.release(); return res.json({ success: false, message: 'Please enter a valid 10-digit SPOC WhatsApp number (starting 6-9)' }); }
+      if (!orgName) { client.release(); return res.json({ success: false, message: 'Please enter the group / artist / sponsor name' }); }
+    } else {
+      flat = normalizeFlat(body.flat);
+      phase = (body.phase || '').trim().toUpperCase();
+      tower = (body.tower || '').trim();
+      contact = (body.contact || '').trim();
+      phone = normalizePhone(body.phone);
+      if (!flat) { client.release(); return res.json({ success: false, message: 'Flat number is required' }); }
+      if (phase !== 'PH1' && phase !== 'PH2') { client.release(); return res.json({ success: false, message: 'Please select a Phase' }); }
+      if (!TOWER_OPTIONS.includes(tower)) { client.release(); return res.json({ success: false, message: 'Please select a Tower' }); }
+      if (!isValidFlat(phase, tower, flat)) { client.release(); return res.json({ success: false, message: 'This is not a valid DSRWW flat number for the selected Phase/Tower. Please check and re-enter.' }); }
+      if (!contact) { client.release(); return res.json({ success: false, message: 'Contact name is required' }); }
+      if (!/^91[6-9]\d{9}$/.test(phone)) { client.release(); return res.json({ success: false, message: 'Please enter a valid 10-digit mobile number (starting 6-9)' }); }
+    }
 
     await client.query('BEGIN');
     const r = await client.query('SELECT * FROM registrations WHERE reg_id = $1 FOR UPDATE', [regId]);
@@ -720,8 +835,8 @@ app.post('/api/admin/update-registration', async (req, res) => {
     }
 
     await client.query(
-      `UPDATE registrations SET flat=$1, phase=$2, tower=$3, contact=$4, phone=$5, adult_names=$6, kid_names=$7, adult_count=$8, kid_count=$9, total=$10 WHERE reg_id=$11`,
-      [flat, phase, tower, contact, phone, JSON.stringify(newAdults), JSON.stringify(newKids), adultCount, kidCount, total, regId]
+      `UPDATE registrations SET flat=$1, phase=$2, tower=$3, contact=$4, phone=$5, adult_names=$6, kid_names=$7, adult_count=$8, kid_count=$9, total=$10, committee_name=$11, org_name=$12, notes=$13 WHERE reg_id=$14`,
+      [flat, phase, tower, contact, phone, JSON.stringify(newAdults), JSON.stringify(newKids), adultCount, kidCount, total, committeeName, orgName, notes, regId]
     );
 
     await client.query('COMMIT');
@@ -876,6 +991,14 @@ app.get('/api/admin/revenue', async (req, res) => {
     const confirmedRevenue = confirmedRows.reduce((s, r) => s + (r.total || 0), 0);
     const pendingRevenue = pendingRows.reduce((s, r) => s + (r.total || 0), 0);
 
+    // Sponsor/Artist entries are approved the same way as residents, but nobody actually paid
+    // via UPI for them - that amount is instead owed by the treasurer at reconciliation, so it's
+    // split out of "collected" revenue rather than counted alongside real resident payments.
+    const residentConfirmedRows = confirmedRows.filter(r => (r.reg_type || 'Resident') === 'Resident');
+    const sponsorConfirmedRows = confirmedRows.filter(r => r.reg_type === 'Sponsor');
+    const residentRevenue = residentConfirmedRows.reduce((s, r) => s + (r.total || 0), 0);
+    const sponsorOwedRevenue = sponsorConfirmedRows.reduce((s, r) => s + (r.total || 0), 0);
+
     let totalAdultsConfirmed = 0, totalKidsConfirmed = 0;
     confirmedRows.forEach(r => {
       totalAdultsConfirmed += countFor(r.reg_id, 'Adult');
@@ -921,6 +1044,7 @@ app.get('/api/admin/revenue', async (req, res) => {
     res.json({
       success: true,
       confirmedRevenue, pendingRevenue, adultRevenue, kidRevenue,
+      residentRevenue, sponsorOwedRevenue, sponsorConfirmedCount: sponsorConfirmedRows.length,
       totalAdultsConfirmed, totalKidsConfirmed,
       refundsOwedTotal, refundsOwedCount: refundsOwedRows.length, refundsPaidTotal,
       netRevenue, byPhase, byDay
@@ -970,7 +1094,9 @@ function fmtIST(ts) {
 // name array that could have drifted from a direct database edit.
 function regRow(r, adultNames, kidNames) {
   return {
-    reg_id: r.reg_id, flat: r.flat, phase: r.phase || '', tower: r.tower || '', contact: r.contact, phone: r.phone,
+    reg_id: r.reg_id, reg_type: r.reg_type || 'Resident',
+    flat: r.flat || '', phase: r.phase || '', tower: r.tower || '', contact: r.contact, phone: r.phone,
+    committee_name: r.committee_name || '', org_name: r.org_name || '', notes: r.notes || '',
     adults: adultNames.join(', '), kids: kidNames.join(', '),
     adult_count: adultNames.length, kid_count: kidNames.length, total: r.total,
     txn_ref: r.txn_ref || '', status: r.status,
@@ -982,11 +1108,15 @@ function regRow(r, adultNames, kidNames) {
 
 const REG_COLUMNS = [
   { header: 'Reg ID', key: 'reg_id', width: 12 },
+  { header: 'Type', key: 'reg_type', width: 12 },
   { header: 'Tower', key: 'tower', width: 12 },
   { header: 'Flat', key: 'flat', width: 12 },
   { header: 'Phase', key: 'phase', width: 10 },
-  { header: 'Contact Name', key: 'contact', width: 22 },
-  { header: 'Phone', key: 'phone', width: 15 },
+  { header: 'Contact / SPOC Name', key: 'contact', width: 22 },
+  { header: 'Phone / SPOC Number', key: 'phone', width: 18 },
+  { header: 'Committee', key: 'committee_name', width: 18 },
+  { header: 'Group / Artist / Sponsor', key: 'org_name', width: 22 },
+  { header: 'Notes', key: 'notes', width: 24 },
   { header: 'Adults (Names)', key: 'adults', width: 30 },
   { header: 'Kids (Names)', key: 'kids', width: 30 },
   { header: 'Adult Count', key: 'adult_count', width: 12 },
@@ -1032,6 +1162,8 @@ app.get('/api/admin/export', async (req, res) => {
       confirmedRows.reduce((s, r) => s + namesFor(r.reg_id, 'Kid').length, 0);
     const confirmedRevenue = confirmedRows.reduce((s, r) => s + (r.total || 0), 0);
     const pendingRevenue = pendingRows.reduce((s, r) => s + (r.total || 0), 0);
+    const residentRevenue = confirmedRows.filter(r => (r.reg_type || 'Resident') === 'Resident').reduce((s, r) => s + (r.total || 0), 0);
+    const sponsorOwedRevenue = confirmedRows.filter(r => r.reg_type === 'Sponsor').reduce((s, r) => s + (r.total || 0), 0);
     const checkedInCount = coupons.rows.filter(c => c.checked_in).length;
     const bookedCount = coupons.rows.filter(c => c.slot_number).length;
 
@@ -1053,6 +1185,8 @@ app.get('/api/admin/export', async (req, res) => {
       ['  - Kids', totalKids],
       ['', ''],
       ['Revenue confirmed (Rs)', confirmedRevenue],
+      ['  - Collected from residents (Rs)', residentRevenue],
+      ['  - Owed by treasurer, Artist/Sponsor (Rs)', sponsorOwedRevenue],
       ['Revenue pending (Rs)', pendingRevenue],
       ['', ''],
       ['Coupons issued', coupons.rows.length],
@@ -1067,24 +1201,27 @@ app.get('/api/admin/export', async (req, res) => {
     wsPending.columns = REG_COLUMNS;
     pendingRows.forEach(r => wsPending.addRow(regRow(r, r.adult_names || [], r.kid_names || [])));
     wsPending.getRow(1).font = { bold: true };
-    wsPending.autoFilter = { from: 'A1', to: 'P1' };
+    wsPending.autoFilter = { from: 'A1', to: 'T1' };
 
     // -------- Confirmed Registrations --------
     const wsConfirmed = wb.addWorksheet('Confirmed Registrations');
     wsConfirmed.columns = REG_COLUMNS;
     confirmedRows.forEach(r => wsConfirmed.addRow(regRow(r, namesFor(r.reg_id, 'Adult'), namesFor(r.reg_id, 'Kid'))));
     wsConfirmed.getRow(1).font = { bold: true };
-    wsConfirmed.autoFilter = { from: 'A1', to: 'P1' };
+    wsConfirmed.autoFilter = { from: 'A1', to: 'T1' };
 
     // -------- Rejected Registrations --------
     const wsRejected = wb.addWorksheet('Rejected Registrations');
     wsRejected.columns = [
       { header: 'Reg ID', key: 'reg_id', width: 12 },
+      { header: 'Type', key: 'reg_type', width: 12 },
       { header: 'Tower', key: 'tower', width: 12 },
       { header: 'Flat', key: 'flat', width: 12 },
       { header: 'Phase', key: 'phase', width: 10 },
-      { header: 'Contact Name', key: 'contact', width: 22 },
-      { header: 'Phone', key: 'phone', width: 15 },
+      { header: 'Contact / SPOC Name', key: 'contact', width: 22 },
+      { header: 'Phone / SPOC Number', key: 'phone', width: 18 },
+      { header: 'Committee', key: 'committee_name', width: 18 },
+      { header: 'Group / Artist / Sponsor', key: 'org_name', width: 22 },
       { header: 'Adults (Names)', key: 'adults', width: 30 },
       { header: 'Kids (Names)', key: 'kids', width: 30 },
       { header: 'Total (Rs)', key: 'total', width: 12 },
@@ -1094,14 +1231,16 @@ app.get('/api/admin/export', async (req, res) => {
     ];
     rejectedRows.forEach(r => {
       wsRejected.addRow({
-        reg_id: r.reg_id, flat: r.flat, phase: r.phase || '', tower: r.tower || '', contact: r.contact, phone: r.phone,
+        reg_id: r.reg_id, reg_type: r.reg_type || 'Resident',
+        flat: r.flat || '', phase: r.phase || '', tower: r.tower || '', contact: r.contact, phone: r.phone,
+        committee_name: r.committee_name || '', org_name: r.org_name || '',
         adults: (r.adult_names || []).join(', '), kids: (r.kid_names || []).join(', '), total: r.total,
         reason: r.rejected_reason || '', rejected_by: r.rejected_by || '',
         rejected_at: fmtIST(r.rejected_at)
       });
     });
     wsRejected.getRow(1).font = { bold: true };
-    wsRejected.autoFilter = { from: 'A1', to: 'L1' };
+    wsRejected.autoFilter = { from: 'A1', to: 'O1' };
 
     // -------- Coupon Details (one row per person) --------
     const wsCoupons = wb.addWorksheet('Coupon Details');
