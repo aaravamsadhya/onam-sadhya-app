@@ -468,8 +468,8 @@ function buildWhatsAppLink(phone, message) {
 // were verified to survive that same link handler correctly, so those are used instead for visual
 // emphasis.
 const SYM = {
-  check: '\u{2713}', // ✓
-  cross: '\u{2717}'  // ✗
+  check: '\u{2713}', // check
+  cross: '\u{2717}'  // cross
 };
 
 app.get('/api/admin/share-coupons', async (req, res) => {
@@ -1291,9 +1291,16 @@ async function getSlots() {
   );
   const counts = {};
   countR.rows.forEach(row => { counts[row.slot_number] = row.n; });
+  // Slots 3 & 4 start locked and only open once an admin manually flips manually_unlocked on
+  // from the Slot Management widget - there's no automatic fill-percentage threshold. This is a
+  // deliberate choice: the committee wants a judgment call on when to release the later slots
+  // (e.g. based on how the WhatsApp group is reacting), not a fixed rule that might not match
+  // real booking patterns on the day.
   return slotR.rows.map(s => ({
     number: s.slot_number, time: s.slot_time, capacity: s.capacity,
-    booked: counts[s.slot_number] || 0, remaining: s.capacity - (counts[s.slot_number] || 0)
+    booked: counts[s.slot_number] || 0, remaining: s.capacity - (counts[s.slot_number] || 0),
+    manuallyUnlocked: !!s.manually_unlocked,
+    locked: (s.slot_number === 3 || s.slot_number === 4) && !s.manually_unlocked
   }));
 }
 
@@ -1328,6 +1335,14 @@ app.post('/api/book-slot', async (req, res) => {
     }
     const slot = slotR.rows[0];
 
+    // Slots 3 & 4 are locked until an admin manually opens them from the Slot Management widget
+    // - enforced here (not just hidden in the UI) so it can't be bypassed by calling this
+    // endpoint directly, e.g. from a browser dev console.
+    if ((slotNum === 3 || slotNum === 4) && !slot.manually_unlocked) {
+      await client.query('ROLLBACK');
+      return res.json({ success: false, message: 'Slot ' + slotNum + ' isn\'t open yet as part of queue management. Please pick Slot 1 or 2 for now - we\'ll let everyone know on WhatsApp once the later slots open up.' });
+    }
+
     const countR = await client.query('SELECT COUNT(*)::int AS n FROM coupons WHERE slot_number=$1', [slotNum]);
     let booked = countR.rows[0].n;
     if (coupon.slot_number === slotNum) booked -= 1;
@@ -1348,6 +1363,31 @@ app.post('/api/book-slot', async (req, res) => {
     res.status(500).json({ success: false, message: 'Server error: ' + err.message });
   } finally {
     client.release();
+  }
+});
+
+// Admin-only control for the Slot Management widget - opens or re-locks Slot 3/4. Only those two
+// slot numbers are accepted; Slot 1/2 have no lock state to toggle. Re-locking a slot only blocks
+// *new* bookings into it - anyone already booked in stays booked, their coupon doesn't change.
+app.post('/api/admin/toggle-slot-unlock', async (req, res) => {
+  const body = req.body || {};
+  const access = requireWriteAccess(body.pin);
+  if (!access.ok) return res.json({ success: false, message: access.message });
+  try {
+    const slotNum = Number(body.slotNumber);
+    const unlock = !!body.unlock;
+    if (slotNum !== 3 && slotNum !== 4) {
+      return res.json({ success: false, message: 'Only Slot 3 and Slot 4 have a lock to toggle.' });
+    }
+    const r = await pool.query(
+      'UPDATE slots SET manually_unlocked=$1 WHERE slot_number=$2 RETURNING slot_number',
+      [unlock, slotNum]
+    );
+    if (!r.rows.length) return res.json({ success: false, message: 'Slot ' + slotNum + ' not found.' });
+    res.json({ success: true, slotNumber: slotNum, unlocked: unlock });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Server error: ' + err.message });
   }
 });
 
