@@ -108,6 +108,11 @@ ALTER TABLE registrations ADD COLUMN IF NOT EXISTS notes TEXT;
 -- (the public registration form still enforces it via VALID_FLATS for actual residents - this
 -- only relaxes the column so the admin-only Sponsor path can leave it blank).
 ALTER TABLE registrations ALTER COLUMN flat DROP NOT NULL;
+
+-- Slot 3 & 4 start locked (no auto-unlock threshold - the committee decided a manual, judgment
+-- call is safer than a fixed percentage) and only open once an admin flips this on from the new
+-- Slot Management widget. Slot 1 & 2 ignore this column entirely - they're always open.
+ALTER TABLE slots ADD COLUMN IF NOT EXISTS manually_unlocked BOOLEAN NOT NULL DEFAULT false;
 `;
 
 // Sized for a maximum expected turnout of ~400 people: 4 slots x 110 capacity = 440, with
@@ -137,4 +142,3 @@ async function init() {
 }
 
 module.exports = { pool, init };
-
