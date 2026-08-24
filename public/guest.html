@@ -267,11 +267,16 @@
     slots.forEach(function(s){
       var isFull = s.remaining <= 0 && String(s.number) !== String(myInfo.slotNumber);
       var isMine = String(s.number) === String(myInfo.slotNumber);
-      html += '<div class="slot-option ' + (isFull?'full':'') + (isMine?' selected':'') + '" ' +
-        (isFull ? '' : 'onclick="pick(' + s.number + ')"') + '>' +
+      // Slots 3 & 4 stay locked (greyed out, not clickable) until the committee manually opens
+      // them from the admin console - this is just the display side of it; the server
+      // independently refuses to book a locked slot even if this markup were bypassed.
+      var isLocked = !!s.locked && !isMine;
+      var isBlocked = isFull || isLocked;
+      html += '<div class="slot-option ' + (isBlocked?'full':'') + (isMine?' selected':'') + '" ' +
+        (isBlocked ? '' : 'onclick="pick(' + s.number + ')"') + '>' +
         '<div><div class="slot-time">Slot ' + s.number + ' — ' + s.time + '</div></div>' +
-        '<div class="slot-remain ' + (s.remaining<=15 && s.remaining>0 ? 'low':'') + '">' +
-        (isFull ? 'FULL' : s.remaining + ' seats left') + '</div></div>';
+        '<div class="slot-remain ' + (s.remaining<=15 && s.remaining>0 && !isLocked ? 'low':'') + '">' +
+        (isLocked ? 'Queue management: opens once Slot 1 &amp; 2 are full' : (isFull ? 'FULL' : s.remaining + ' seats left')) + '</div></div>';
     });
     el('slotList').innerHTML = html;
   }
