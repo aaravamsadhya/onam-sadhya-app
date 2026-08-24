@@ -156,6 +156,12 @@
       <button class="btn-danger" onclick="logout()" style="width:100%;margin-top:8px;">🚪 Log Out</button>
     </div>
 
+    <div class="card" id="slotMgmtCard">
+      <h2>🎟 Slot Management</h2>
+      <p style="font-size:12px;color:#8a7a4d;margin:0 0 10px;">Slot 1 &amp; 2 are always open. Slot 3 &amp; 4 stay locked for queue management until you open them below - locking a slot again only blocks new bookings into it, it won't remove anyone already booked in.</p>
+      <div id="slotMgmtList"></div>
+    </div>
+
     <div class="card">
       <h2>Confirmed Summary</h2>
       <div class="stat-row" id="confirmedStatRow"></div>
@@ -760,6 +766,75 @@
         '<div style="width:70px;text-align:right;">' + s.booked + '/' + s.capacity + '</div></div>';
     });
     document.getElementById('dashSlots').innerHTML = html;
+    DASH_SLOTS = dash.slots || [];
+    renderSlotManagement();
+  }
+
+  // ============== SLOT MANAGEMENT (booked/capacity per slot, lock control, drill-down) ==============
+  var DASH_SLOTS = [];
+
+  function renderSlotManagement(){
+    var container = document.getElementById('slotMgmtList');
+    if(!DASH_SLOTS.length){ container.innerHTML = '<div class="empty-note">Loading…</div>'; return; }
+    var html = '';
+    DASH_SLOTS.forEach(function(s){
+      var pct = s.capacity ? Math.min(100, Math.round(100*s.booked/s.capacity)) : 0;
+      var isLockable = (s.number === 3 || s.number === 4);
+      var statusPill;
+      if(isLockable && s.locked){
+        statusPill = '<span class="pill" style="background:#FDECEA;color:#8E1B1B;">🔒 Locked</span>';
+      } else if(isLockable && s.manuallyUnlocked){
+        statusPill = '<span class="pill confirmed">✓ Manually Opened</span>';
+      } else {
+        statusPill = '<span class="pill confirmed">Open</span>';
+      }
+      if(s.remaining <= 0) statusPill += ' <span class="pill" style="background:#f0f0f0;color:#555;">Full</span>';
+
+      var toggleBtn = '';
+      if(isLockable && !IS_READONLY){
+        toggleBtn = s.manuallyUnlocked
+          ? '<button class="btn-secondary" onclick="toggleSlotUnlock(' + s.number + ', false)">🔒 Lock Slot ' + s.number + ' Again</button>'
+          : '<button class="btn-confirm" onclick="toggleSlotUnlock(' + s.number + ', true)">🔓 Enable Slot ' + s.number + ' Now</button>';
+      }
+
+      // Drill-down of every active coupon booked into this slot - reuses COUPON_INDEX, which is
+      // already built from the same registrations data the rest of the page uses, so this needs
+      // no extra server call. Bookings are per-coupon (per person), not per-family, so a
+      // household could show up split across two different slots here - that's expected, not a bug.
+      var rows = Object.keys(COUPON_INDEX).map(function(k){ return COUPON_INDEX[k]; })
+        .filter(function(c){ return Number(c.slotNumber) === s.number && c.active !== false; })
+        .sort(function(a,b){ return (a.flat||'').localeCompare(b.flat||''); });
+      var drillHtml = rows.length
+        ? rows.map(function(c){
+            return '<div class="result-row"><div><b>' + escapeHtml(c.name) + '</b> (' + c.type + ') — ' + escapeHtml(c.couponId) +
+              '<br><span style="color:#888;">' + escapeHtml(c.flat || (c.regId||'')) +
+              (c.phase ? (' ' + escapeHtml(c.phase)) : '') + (c.tower ? (' &middot; ' + escapeHtml(c.tower)) : '') + '</span></div></div>';
+          }).join('')
+        : '<div class="empty-note">No bookings yet.</div>';
+
+      html += '<details class="group-phase"><summary>Slot ' + s.number + ' (' + s.time + ') ' +
+        '<span class="pill confirmed">' + s.booked + '/' + s.capacity + '</span></summary>' +
+        '<div class="slot-bar" style="border-bottom:none;"><div class="bar" style="flex:1;"><div class="fill" style="width:' + pct + '%;"></div></div>' +
+        '<div style="width:50px;text-align:right;">' + pct + '%</div></div>' +
+        '<div style="margin:8px 0;">' + statusPill + '</div>' +
+        (toggleBtn ? '<div style="margin-bottom:10px;">' + toggleBtn + '</div>' : '') +
+        '<div class="edit-section-label">Bookings in this slot</div>' +
+        drillHtml +
+        '</details>';
+    });
+    container.innerHTML = html;
+  }
+
+  async function toggleSlotUnlock(slotNumber, unlock){
+    var msg = unlock
+      ? 'Open Slot ' + slotNumber + ' for new bookings now?'
+      : 'Lock Slot ' + slotNumber + ' again? Anyone already booked into it stays booked - this only blocks new bookings from this point on.';
+    if(!confirm(msg)) return;
+    try{
+      var res = await api('POST', '/api/admin/toggle-slot-unlock', { pin: PIN, slotNumber: slotNumber, unlock: unlock });
+      if(!res.success){ alert(res.message); return; }
+      await refreshAll();
+    }catch(err){ alert('Error: ' + err.message); }
   }
 
   function stat(n, label){
@@ -780,6 +855,7 @@
     ALL_REGS = res.registrations || [];
     indexCoupons(ALL_REGS);
     renderAll();
+    renderSlotManagement();
   }
 
   function applyRegFilter(){ renderAll(); }
