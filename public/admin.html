@@ -206,15 +206,6 @@
       <div id="deletedList"></div>
     </div>
 
-    <div class="card" id="goLiveCard">
-      <h2>🚀 Go Live</h2>
-      <div class="danger-zone" style="margin-top:0;">
-        <p>Wipes every registration, coupon, and deleted-registration record, and restarts the REG-xxx / AAR-xxx numbering back to 1. Use this ONCE, right before opening real bookings, to clear out test entries. This cannot be undone.</p>
-        <button class="btn-danger" style="width:100%;" onclick="resetAllData()">🗑 Reset All Data (clear test entries)</button>
-      </div>
-      <div class="msg" id="resetMsg"></div>
-    </div>
-
     <div class="card">
       <h2>📦 Coupon Backup (for an app outage on event day)</h2>
       <p style="font-size:12px;color:#8a7a4d;margin:0 0 10px;">Generates a backup of every Confirmed, slot-booked coupon - a ZIP of individual coupon images, and a printable roster PDF - so gate volunteers can still admit people by hand if the app itself is ever unreachable.</p>
@@ -614,7 +605,6 @@
     if(!IS_READONLY) return;
     document.getElementById('manageCard').classList.add('hidden');
     document.getElementById('addSponsorCard').classList.add('hidden');
-    document.getElementById('goLiveCard').classList.add('hidden');
     var badge = document.getElementById('whoBadge');
     var tag = document.createElement('span');
     tag.style.cssText = 'background:#FFF3CD;color:#8a6d00;padding:2px 8px;border-radius:10px;font-size:11px;margin-left:6px;font-weight:700;';
@@ -722,30 +712,6 @@
       loadDeletedRegistrations();
       loadRevenue();
     }catch(err){ alert('Error: ' + err.message); }
-  }
-
-  // Wipes every registration/coupon/deleted-registration record and restarts the
-  // REG-xxx / AAR-xxx numbering, so testing data doesn't carry over into the real event.
-  // The server independently requires the literal text "RESET" as well as a valid
-  // write-access PIN, so this can't be triggered by a stray click alone.
-  async function resetAllData(){
-    var msgEl = document.getElementById('resetMsg');
-    msgEl.style.display = 'none';
-    if(!confirm('This will PERMANENTLY delete every registration, coupon, and deleted-registration record, and restart REG/AAR numbering from 1. This cannot be undone. Continue?')) return;
-    var typed = prompt('Type RESET (all caps) to confirm you want to wipe all test data:');
-    if(typed === null) return;
-    try{
-      var res = await api('POST', '/api/admin/reset-all-data', { pin: PIN, confirm: typed });
-      if(!res.success){
-        msgEl.className = 'msg err'; msgEl.style.display = 'block'; msgEl.innerText = res.message;
-        return;
-      }
-      msgEl.className = 'msg ok'; msgEl.style.display = 'block';
-      msgEl.innerText = 'Done — all test data cleared. Numbering restarted at REG-001 / AAR-001. The app is ready for real bookings.';
-      await refreshAll();
-    }catch(err){
-      msgEl.className = 'msg err'; msgEl.style.display = 'block'; msgEl.innerText = 'Error: ' + err.message;
-    }
   }
 
   function renderDashboard(dash){
