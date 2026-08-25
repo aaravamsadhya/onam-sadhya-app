@@ -585,11 +585,17 @@
         '<div style="margin-top:6px;font-size:13px;">' + escapeHtml(reg.flat || '') + locationSuffix(reg) +
         ' &middot; ₹' + reg.total + ' &middot; ' + reg.adultCount + ' adult(s), ' + reg.kidCount + ' kid(s)</div>';
       if(reg.status === 'Confirmed' && reg.coupons){
+        // This status check only ever shows read-only info - it deliberately does not include
+        // a clickable link to the actual coupon page. That link contains a private token that
+        // lets you select/change a slot or download the coupon, so it's only ever sent to the
+        // family's own WhatsApp (see the committee's "Share Coupons" step) - never shown here,
+        // since anyone could otherwise look up a stranger's coupon just by typing their number.
         html += '<div style="margin-top:10px;font-weight:700;font-size:13px;">Coupons:</div>';
         reg.coupons.forEach(function(c){
-          html += '<a class="person-link" href="' + c.url + '">' + c.name + ' (' + c.type + ')' +
-            (c.slotNumber ? ' - Slot ' + c.slotNumber + ' (' + c.slotTime + ')' : ' - pick your slot') + '</a>';
+          html += '<div class="person-link">' + escapeHtml(c.name) + ' (' + c.type + ')' +
+            (c.slotNumber ? ' - Slot ' + c.slotNumber + ' (' + c.slotTime + ')' : ' - slot not selected yet') + '</div>';
         });
+        html += '<div style="margin-top:6px;font-size:12px;color:#888;">Your coupon links were sent to your WhatsApp. Didn\'t get them or lost them? Contact the committee to resend.</div>';
       } else if(reg.status === 'Pending') {
         html += '<div style="margin-top:8px;font-size:12px;color:#888;">Waiting for the committee to verify your payment.</div>';
       }
