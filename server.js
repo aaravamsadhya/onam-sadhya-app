@@ -314,7 +314,19 @@ app.post('/api/lookup', async (req, res) => {
         total: reg.total, adultCount: reg.adult_count, kidCount: reg.kid_count
       };
       if (reg.status === 'Confirmed') {
-        entry.coupons = await getCouponsForReg(reg.reg_id, baseUrl(req));
+        // This lookup is reachable by anyone who types in a phone number - there is no proof
+        // the requester actually owns that number. getCouponsForReg() normally includes each
+        // coupon's private token/url (that's fine for admin-only or WhatsApp-share callers,
+        // which are authenticated or only ever deliver it to the number itself), but handing
+        // that same token back here would let anyone with just a phone number open a stranger's
+        // coupon page and select/change their slot or download their coupon. So this endpoint
+        // strips the url/token and only ever returns status info - the real link only ever
+        // reaches someone via their own WhatsApp (see /api/admin/share-coupons).
+        const fullCoupons = await getCouponsForReg(reg.reg_id, baseUrl(req));
+        entry.coupons = fullCoupons.map(c => ({
+          couponId: c.couponId, name: c.name, type: c.type,
+          slotNumber: c.slotNumber, slotTime: c.slotTime
+        }));
         entry.adultCount = entry.coupons.filter(c => c.type === 'Adult').length;
         entry.kidCount = entry.coupons.filter(c => c.type === 'Kid').length;
       }
@@ -468,8 +480,8 @@ function buildWhatsAppLink(phone, message) {
 // were verified to survive that same link handler correctly, so those are used instead for visual
 // emphasis.
 const SYM = {
-  check: '\u{2713}', // check
-  cross: '\u{2717}'  // cross
+  check: '\u{2713}', // ✓
+  cross: '\u{2717}'  // ✗
 };
 
 app.get('/api/admin/share-coupons', async (req, res) => {
