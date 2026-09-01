@@ -89,6 +89,51 @@ function requireWriteAccess(pin) {
   return { ok: true, admin };
 }
 
+// Lets the committee close/reopen public registration from the admin console, without a code
+// change or redeploy. Backed by the app_settings table (see db.js) rather than an env var, since
+// the committee needs to flip this themselves, on demand, possibly more than once (e.g. to admit
+// a late exception after "closing"). Defaults to true if the row is somehow missing, matching the
+// ON CONFLICT DO NOTHING default seeded in db.js - fails open rather than silently blocking
+// everyone if this ever gets queried before init() has run.
+async function getRegistrationsOpen() {
+  const r = await pool.query(`SELECT value FROM app_settings WHERE key = 'registrations_open'`);
+  if (!r.rows.length) return true;
+  return r.rows[0].value === 'true';
+}
+
+async function setRegistrationsOpen(open) {
+  await pool.query(
+    `INSERT INTO app_settings (key, value) VALUES ('registrations_open', $1)
+     ON CONFLICT (key) DO UPDATE SET value = $1`,
+    [open ? 'true' : 'false']
+  );
+}
+
+const REGISTRATIONS_CLOSED_MESSAGE =
+  'Registrations for Aaravam Onam Sadhya 2026 is closed. Please reach out to the Sadhya Committee in case any seats are available.';
+
+// Lets the committee freeze all resident-facing slot pick/change (guest.html -> /api/book-slot)
+// for the last hour before the event, so they can manually finish assigning slots to stragglers
+// (see /api/admin/assign-slot below) without a resident's own pick racing against it. Does NOT
+// affect the admin's own assign-slot endpoint or the gate scanner's override-slot - both are
+// authenticated, deliberate actions the committee needs to keep working regardless.
+async function getSlotSelectionLocked() {
+  const r = await pool.query(`SELECT value FROM app_settings WHERE key = 'slot_selection_locked'`);
+  if (!r.rows.length) return false;
+  return r.rows[0].value === 'true';
+}
+
+async function setSlotSelectionLocked(locked) {
+  await pool.query(
+    `INSERT INTO app_settings (key, value) VALUES ('slot_selection_locked', $1)
+     ON CONFLICT (key) DO UPDATE SET value = $1`,
+    [locked ? 'true' : 'false']
+  );
+}
+
+const SLOT_SELECTION_LOCKED_MESSAGE =
+  'Slot selection has been closed by the committee for final arrangements. Please contact the committee if you need help with your slot.';
+
 function normalizePhone(phone) {
   let d = String(phone || '').replace(/\D/g, '');
   if (d.length === 10) d = '91' + d;
@@ -180,8 +225,18 @@ app.get('/', (req, res) => {
 });
 
 // ================= PUBLIC CONFIG =================
-app.get('/api/config', (req, res) => {
-  res.json({ adultPrice: CFG.adultPrice, kidPrice: CFG.kidPrice, upiId: CFG.upiId, upiName: CFG.upiName });
+app.get('/api/config', async (req, res) => {
+  try {
+    const registrationsOpen = await getRegistrationsOpen();
+    res.json({
+      adultPrice: CFG.adultPrice, kidPrice: CFG.kidPrice, upiId: CFG.upiId, upiName: CFG.upiName,
+      registrationsOpen
+    });
+  } catch (err) {
+    console.error(err);
+    // Fails open on error too - a config-fetch failure shouldn't itself lock out registrations.
+    res.json({ adultPrice: CFG.adultPrice, kidPrice: CFG.kidPrice, upiId: CFG.upiId, upiName: CFG.upiName, registrationsOpen: true });
+  }
 });
 
 // ================= REGISTRATION =================
@@ -200,6 +255,13 @@ async function existingRegistrationsForPhone(phone) {
 
 app.post('/api/register', async (req, res) => {
   try {
+    // Checked first, before any field validation - this is the actual enforcement point (the
+    // register.html form hiding itself is just the friendly version of this for someone who
+    // never touches the API directly). A closed status is not an error, so this returns the same
+    // { success: false, message } shape submitForm() already knows how to display.
+    if (!(await getRegistrationsOpen())) {
+      return res.json({ success: false, message: REGISTRATIONS_CLOSED_MESSAGE });
+    }
     const body = req.body || {};
     const contact = (body.contact || '').trim();
     const flat = normalizeFlat(body.flat);
@@ -480,8 +542,8 @@ function buildWhatsAppLink(phone, message) {
 // were verified to survive that same link handler correctly, so those are used instead for visual
 // emphasis.
 const SYM = {
-  check: '\u{2713}', // ✓
-  cross: '\u{2717}'  // ✗
+  check: '\u{2713}', // check mark
+  cross: '\u{2717}'  // cross mark
 };
 
 app.get('/api/admin/share-coupons', async (req, res) => {
@@ -568,7 +630,7 @@ app.post('/api/admin/mark-coupon-shared', async (req, res) => {
     const { regId, shared } = req.body || {};
     const isShared = shared !== false; // defaults to true unless explicitly told to unset
     const r = await pool.query(
-      'UPDATE registrations SET coupon_shared=$1, coupon_shared_at=' + (isShared ? 'now()' : 'NULL') + ' WHERE reg_id=$2 RETURNING reg_id',
+      'UPDATE registrations SET coupon_shared=$1, coupon_shared_at=' + (isShared ? 'now()' : 'NULL') + ' WHERE reg_id=$2',
       [isShared, regId]
     );
     if (!r.rows.length) return res.json({ success: false, message: 'Registration not found' });
@@ -1072,6 +1134,8 @@ app.get('/api/admin/dashboard', async (req, res) => {
   try {
     const admin = findAdminUser(req.query.pin);
     const slots = await getSlots();
+    const registrationsOpen = await getRegistrationsOpen();
+    const slotSelectionLocked = await getSlotSelectionLocked();
     const coupCount = await pool.query('SELECT COUNT(*)::int AS n FROM coupons');
     const bookedCount = await pool.query('SELECT COUNT(*)::int AS n FROM coupons WHERE slot_number IS NOT NULL');
     const checkedInCount = await pool.query('SELECT COUNT(*)::int AS n FROM coupons WHERE checked_in = true');
@@ -1079,7 +1143,7 @@ app.get('/api/admin/dashboard', async (req, res) => {
     const confirmedCount = await pool.query("SELECT COUNT(*)::int AS n FROM registrations WHERE status = 'Confirmed'");
     const rejectedCount = await pool.query("SELECT COUNT(*)::int AS n FROM registrations WHERE status = 'Rejected'");
     res.json({
-      success: true, slots, adminName: admin ? admin.name : 'Committee', readOnly: admin ? !!admin.readOnly : false,
+      success: true, slots, registrationsOpen, slotSelectionLocked, adminName: admin ? admin.name : 'Committee', readOnly: admin ? !!admin.readOnly : false,
       issued: coupCount.rows[0].n, booked: bookedCount.rows[0].n, checkedIn: checkedInCount.rows[0].n,
       pendingRegs: pendingCount.rows[0].n, confirmedRegs: confirmedCount.rows[0].n, rejectedRegs: rejectedCount.rows[0].n
     });
@@ -1321,9 +1385,23 @@ app.get('/api/slots', async (req, res) => {
   catch (err) { console.error(err); res.status(500).json([]); }
 });
 
+// Separate from /api/slots (which stays a bare array - guest.html/register.html both already
+// depend on that shape) so guest.html can check this once up front and show a friendly notice
+// instead of the slot picker, without changing what /api/slots itself returns.
+app.get('/api/slot-lock-status', async (req, res) => {
+  try { res.json({ locked: await getSlotSelectionLocked() }); }
+  catch (err) { console.error(err); res.json({ locked: false }); }
+});
+
 app.post('/api/book-slot', async (req, res) => {
   const client = await pool.connect();
   try {
+    if (await getSlotSelectionLocked()) {
+      // No client.release() here - the finally block below always runs (even after this early
+      // return) and already releases it; releasing twice throws "Release called on client which
+      // has already been released to the pool."
+      return res.json({ success: false, message: SLOT_SELECTION_LOCKED_MESSAGE });
+    }
     const { token, slotNumber } = req.body || {};
     const slotNum = Number(slotNumber);
     await client.query('BEGIN');
@@ -1400,6 +1478,100 @@ app.post('/api/admin/toggle-slot-unlock', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, message: 'Server error: ' + err.message });
+  }
+});
+
+// Admin-only control for closing/reopening the public registration form. This only affects new
+// registrations (/api/register) - anyone already Confirmed can still check their status, select/
+// change a slot, and download their coupon; the committee can still add exceptions themselves via
+// "Add Sponsor Registration" without needing this reopened. See getRegistrationsOpen() for how
+// the setting is stored/defaulted.
+app.post('/api/admin/toggle-registrations', async (req, res) => {
+  const body = req.body || {};
+  const access = requireWriteAccess(body.pin);
+  if (!access.ok) return res.json({ success: false, message: access.message });
+  try {
+    const open = !!body.open;
+    await setRegistrationsOpen(open);
+    res.json({ success: true, registrationsOpen: open });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Server error: ' + err.message });
+  }
+});
+
+// Freezes/unfreezes the resident-facing pick-your-own-slot flow (see getSlotSelectionLocked()
+// above) - meant for the last hour before the event, once the committee is ready to take over
+// slot assignment themselves via /api/admin/assign-slot below.
+app.post('/api/admin/toggle-slot-selection-lock', async (req, res) => {
+  const body = req.body || {};
+  const access = requireWriteAccess(body.pin);
+  if (!access.ok) return res.json({ success: false, message: access.message });
+  try {
+    const locked = !!body.locked;
+    await setSlotSelectionLocked(locked);
+    res.json({ success: true, slotSelectionLocked: locked });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Server error: ' + err.message });
+  }
+});
+
+// Lets the committee manually put a Confirmed coupon that never picked a slot into one, by
+// coupon ID rather than by the guest's own token - meant for a last-hour sweep once slot
+// selection has been locked (see above) to close the gap for anyone who never finished booking.
+// Deliberately does not check the Slot 3/4 queue-management lock (same convention as the gate
+// scanner's /api/scan/override-slot) since this is an authenticated committee action, not a
+// resident self-service one - but it does still check capacity, so this can't overbook a slot.
+app.post('/api/admin/assign-slot', async (req, res) => {
+  const body = req.body || {};
+  const access = requireWriteAccess(body.pin);
+  if (!access.ok) return res.json({ success: false, message: access.message });
+  const client = await pool.connect();
+  try {
+    const couponId = (body.couponId || '').trim();
+    const slotNum = Number(body.slotNumber);
+    await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock($1)', [slotNum]);
+
+    const cR = await client.query('SELECT * FROM coupons WHERE coupon_id=$1 FOR UPDATE', [couponId]);
+    if (!cR.rows.length) {
+      await client.query('ROLLBACK');
+      return res.json({ success: false, message: 'Coupon not found' });
+    }
+    const coupon = cR.rows[0];
+    if (!coupon.active) {
+      await client.query('ROLLBACK');
+      return res.json({ success: false, message: 'This coupon has been cancelled and can no longer be assigned a slot.' });
+    }
+
+    const slotR = await client.query('SELECT * FROM slots WHERE slot_number=$1', [slotNum]);
+    if (!slotR.rows.length) {
+      await client.query('ROLLBACK');
+      return res.json({ success: false, message: 'Invalid slot selected' });
+    }
+    const slot = slotR.rows[0];
+
+    const countR = await client.query('SELECT COUNT(*)::int AS n FROM coupons WHERE slot_number=$1', [slotNum]);
+    let booked = countR.rows[0].n;
+    if (coupon.slot_number === slotNum) booked -= 1;
+    if (booked >= slot.capacity) {
+      await client.query('ROLLBACK');
+      return res.json({ success: false, message: 'Slot ' + slot.slot_number + ' (' + slot.slot_time + ') is already full - cannot assign them into it.' });
+    }
+
+    await client.query(
+      'UPDATE coupons SET slot_number=$1, slot_time=$2, booked_at=now() WHERE coupon_id=$3',
+      [slotNum, slot.slot_time, couponId]
+    );
+    await client.query('COMMIT');
+    res.json({ success: true, slotNumber: slot.slot_number, slotTime: slot.slot_time, name: coupon.name, couponId: coupon.coupon_id });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Server error: ' + err.message });
+  } finally {
+    client.release();
   }
 });
 
