@@ -113,6 +113,15 @@ ALTER TABLE registrations ALTER COLUMN flat DROP NOT NULL;
 -- call is safer than a fixed percentage) and only open once an admin flips this on from the new
 -- Slot Management widget. Slot 1 & 2 ignore this column entirely - they're always open.
 ALTER TABLE slots ADD COLUMN IF NOT EXISTS manually_unlocked BOOLEAN NOT NULL DEFAULT false;
+
+-- Small key/value store for app-wide settings the committee can flip from the admin console,
+-- without needing a code change or redeploy. Currently just one key ("registrations_open"), but
+-- kept generic so future on/off toggles can reuse the same table instead of each needing their
+-- own column/migration.
+CREATE TABLE IF NOT EXISTS app_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
 `;
 
 // Sized for a maximum expected turnout of ~400 people: 4 slots x 110 capacity = 440, with
@@ -138,6 +147,18 @@ async function init() {
   // earlier test run already seeded the old 5-slot list into this database.
   const keepNums = DEFAULT_SLOTS.map(s => s[0]);
   await pool.query('DELETE FROM slots WHERE slot_number != ALL($1::int[])', [keepNums]);
+  // Defaults to open so a brand-new/existing database never starts up with registrations
+  // silently closed - the committee has to make an explicit choice from the admin console to
+  // close them.
+  await pool.query(
+    `INSERT INTO app_settings (key, value) VALUES ('registrations_open', 'true') ON CONFLICT (key) DO NOTHING`
+  );
+  // Defaults to false (residents CAN pick/change their own slot) - the committee only flips this
+  // on deliberately, in the last hour before the event, once they're ready to take over slot
+  // assignment themselves for anyone still unbooked.
+  await pool.query(
+    `INSERT INTO app_settings (key, value) VALUES ('slot_selection_locked', 'false') ON CONFLICT (key) DO NOTHING`
+  );
   console.log('Database schema ready.');
 }
 
