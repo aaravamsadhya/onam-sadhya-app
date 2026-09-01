@@ -112,6 +112,10 @@
 <script>
   var TOKEN = new URLSearchParams(window.location.search).get('t') || '';
   var myInfo = null;
+  // Set from /api/slot-lock-status in init(), before we decide whether to show the slot picker
+  // or the "Change my slot" link. /api/book-slot independently refuses the same request server-
+  // side if this were somehow bypassed - this is just the friendly, visible half of that gate.
+  var SLOT_LOCKED = false;
 
   function el(id){ return document.getElementById(id); }
 
@@ -213,6 +217,10 @@
     }
     try{
       var info = await api('GET', '/api/coupon?t=' + encodeURIComponent(TOKEN));
+      try{
+        var lockStatus = await api('GET', '/api/slot-lock-status');
+        SLOT_LOCKED = !!lockStatus.locked;
+      }catch(e){ SLOT_LOCKED = false; }
       el('loading').classList.add('hidden');
       if(!info.found){
         el('invalidCard').classList.remove('hidden');
@@ -232,10 +240,15 @@
         el('slotBadge').classList.remove('none');
         el('slotBadge').innerText = 'Slot ' + info.slotNumber + ' — ' + info.slotTime;
         applySlotColor(info.slotNumber);
-        el('changeBtn').classList.remove('hidden');
+        // Once the committee has frozen slot selection, there's no more "Change my slot" -
+        // hide the link entirely rather than showing it and letting the attempt fail.
+        if(!SLOT_LOCKED) el('changeBtn').classList.remove('hidden');
         el('slotHeading').innerText = 'Your Slot';
         el('dlRow').classList.remove('hidden');
         renderBookedState();
+      } else if(SLOT_LOCKED){
+        el('slotHeading').innerText = 'Slot Selection Closed';
+        el('slotList').innerHTML = '<div class="center" style="padding:6px;">Slot selection has been closed by the committee for final arrangements.<br>Please contact the committee if you need help with your slot.</div>';
       } else {
         loadSlots();
       }
