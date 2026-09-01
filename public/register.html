@@ -229,8 +229,26 @@
     document.querySelectorAll('.adultPriceTxt').forEach(function(el){ el.innerText = cfg.adultPrice; });
     document.querySelectorAll('.kidPriceTxt').forEach(function(el){ el.innerText = cfg.kidPrice; });
     document.getElementById('upiIdTxt').innerText = cfg.upiId || '(UPI ID not configured yet)';
+    // The committee can close registrations from the admin console at any time (see
+    // toggleRegistrations() in admin.html) - when that happens, this replaces the booking form
+    // with a plain notice instead of rendering it. This is only the friendly, visible half of the
+    // gate - /api/register itself refuses new registrations regardless of what this page shows,
+    // so someone calling the API directly still gets turned away. "Already registered? Check your
+    // status" is left untouched below, since people who registered before closing still need it.
+    if(cfg.registrationsOpen === false){
+      showRegistrationsClosed();
+      return;
+    }
     renderPeople();
     updateTotal();
+  }
+
+  function showRegistrationsClosed(){
+    document.getElementById('formCard').innerHTML =
+      '<h2>Registrations Closed</h2>' +
+      '<p style="font-size:14px;color:#555;line-height:1.6;">Registrations for Aaravam Onam Sadhya 2026 is closed.<br>Please reach out to the Sadhya Committee in case any seats are available.</p>' +
+      '<div class="center" style="margin-top:12px;">Need help? Contact Arjun &ndash; 9686993334</div>';
+    document.getElementById('payCard').classList.add('hidden');
   }
 
   function addPerson(kind){
