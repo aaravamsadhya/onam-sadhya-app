@@ -110,7 +110,7 @@ async function setRegistrationsOpen(open) {
 }
 
 const REGISTRATIONS_CLOSED_MESSAGE =
-  'Registrations for Aaravam Onam Sadhya 2026 is closed. Please reach out to the Sadhya Committee in case any seats are available.';
+  'Registrations for Aaravam Onam Sadhya 2026 are closed. If you would still like to attend, please contact the Sadhya Committee to check if any seats are available.';
 
 // Lets the committee freeze all resident-facing slot pick/change (guest.html -> /api/book-slot)
 // for the last hour before the event, so they can manually finish assigning slots to stragglers
