@@ -156,10 +156,28 @@
       <button class="btn-danger" onclick="logout()" style="width:100%;margin-top:8px;">🚪 Log Out</button>
     </div>
 
+    <div class="card" id="registrationsCard">
+      <h2>🚦 Registrations</h2>
+      <p style="font-size:12px;color:#8a7a4d;margin:0 0 10px;">Closing this stops new registrations only (the public form shows a "Registrations Closed" notice instead) - anyone already Confirmed can still check their status, book/change a slot, and download their coupon. You can still add an exception yourself via "Add Sponsor Registration" without reopening this.</p>
+      <div id="registrationsStatus"></div>
+    </div>
+
     <div class="card" id="slotMgmtCard">
       <h2>🎟 Slot Management</h2>
       <p style="font-size:12px;color:#8a7a4d;margin:0 0 10px;">Slot 1 &amp; 2 are always open. Slot 3 &amp; 4 stay locked for queue management until you open them below - locking a slot again only blocks new bookings into it, it won't remove anyone already booked in.</p>
       <div id="slotMgmtList"></div>
+
+      <div style="margin-top:16px;padding-top:14px;border-top:1.5px dashed #e2d9b8;">
+        <div style="font-weight:700;font-size:13px;color:var(--leaf-dark);margin-bottom:4px;">Freeze Slot Selection (last hour)</div>
+        <p style="font-size:12px;color:#8a7a4d;margin:0 0 10px;">Stops residents from picking or changing their own slot on their coupon page - use this once you're ready to manually assign anyone still unbooked yourself, below. This is separate from the per-slot lock above.</p>
+        <div id="slotLockStatus"></div>
+      </div>
+    </div>
+
+    <div class="card" id="assignSlotsCard">
+      <h2>🎯 Assign Missing Slots</h2>
+      <p style="font-size:12px;color:#8a7a4d;margin:0 0 10px;">Every Confirmed coupon that hasn't picked a slot yet - pick a slot and click Assign to book it for them directly. This still respects each slot's capacity, but ignores the Slot 3 &amp; 4 queue-management lock above, since this is you assigning it, not a resident self-booking.</p>
+      <div id="assignSlotsList"></div>
     </div>
 
     <div class="card">
@@ -734,6 +752,57 @@
     document.getElementById('dashSlots').innerHTML = html;
     DASH_SLOTS = dash.slots || [];
     renderSlotManagement();
+    renderRegistrationsControl(dash.registrationsOpen);
+    renderSlotLockStatus(dash.slotSelectionLocked);
+  }
+
+  function renderSlotLockStatus(locked){
+    var container = document.getElementById('slotLockStatus');
+    var statusPill = locked
+      ? '<span class="pill" style="background:#FDECEA;color:#8E1B1B;">🔒 Frozen — residents cannot pick/change slots</span>'
+      : '<span class="pill confirmed">✓ Residents can pick/change their own slot</span>';
+    var toggleBtn = IS_READONLY ? '' : (locked
+      ? '<button class="btn-confirm" onclick="toggleSlotSelectionLock(false)">🔓 Unfreeze Slot Selection</button>'
+      : '<button class="btn-danger" onclick="toggleSlotSelectionLock(true)">🔒 Freeze Slot Selection</button>');
+    container.innerHTML = '<div style="margin-bottom:10px;">' + statusPill + '</div>' +
+      (toggleBtn ? '<div>' + toggleBtn + '</div>' : '');
+  }
+
+  async function toggleSlotSelectionLock(locked){
+    var msg = locked
+      ? 'Freeze slot selection now? Residents will no longer be able to pick or change their own slot on their coupon page - only you can assign slots from here on, via Assign Missing Slots below.'
+      : 'Unfreeze slot selection? Residents will be able to pick/change their own slot again immediately.';
+    if(!confirm(msg)) return;
+    try{
+      var res = await api('POST', '/api/admin/toggle-slot-selection-lock', { pin: PIN, locked: locked });
+      if(!res.success){ alert(res.message); return; }
+      await refreshAll();
+    }catch(err){ alert('Error: ' + err.message); }
+  }
+
+  // ============== REGISTRATIONS OPEN/CLOSE (public form gate) ==============
+  function renderRegistrationsControl(open){
+    var container = document.getElementById('registrationsStatus');
+    var statusPill = open
+      ? '<span class="pill confirmed">✓ Open</span>'
+      : '<span class="pill" style="background:#FDECEA;color:#8E1B1B;">🔒 Closed</span>';
+    var toggleBtn = IS_READONLY ? '' : (open
+      ? '<button class="btn-danger" onclick="toggleRegistrations(false)">🔒 Close Registrations</button>'
+      : '<button class="btn-confirm" onclick="toggleRegistrations(true)">🔓 Reopen Registrations</button>');
+    container.innerHTML = '<div style="margin-bottom:10px;">' + statusPill + '</div>' +
+      (toggleBtn ? '<div>' + toggleBtn + '</div>' : '');
+  }
+
+  async function toggleRegistrations(open){
+    var msg = open
+      ? 'Reopen registrations? The public form will accept new registrations again immediately.'
+      : 'Close registrations now? The public form will show a "Registrations Closed" notice instead - anyone already Confirmed is unaffected and can still check status, book a slot, and download their coupon.';
+    if(!confirm(msg)) return;
+    try{
+      var res = await api('POST', '/api/admin/toggle-registrations', { pin: PIN, open: open });
+      if(!res.success){ alert(res.message); return; }
+      await refreshAll();
+    }catch(err){ alert('Error: ' + err.message); }
   }
 
   // ============== SLOT MANAGEMENT (booked/capacity per slot, lock control, drill-down) ==============
@@ -822,6 +891,44 @@
     indexCoupons(ALL_REGS);
     renderAll();
     renderSlotManagement();
+    renderAssignMissingSlots();
+  }
+
+  // ============== ASSIGN MISSING SLOTS (admin picks a slot for a straggler coupon) ==============
+  function renderAssignMissingSlots(){
+    var container = document.getElementById('assignSlotsList');
+    var rows = Object.keys(COUPON_INDEX).map(function(k){ return COUPON_INDEX[k]; })
+      .filter(function(c){ return c.active !== false && !c.slotNumber; })
+      .sort(function(a,b){ return (a.flat||'').localeCompare(b.flat||''); });
+    if(!rows.length){
+      container.innerHTML = '<div class="empty-note">Everyone with a Confirmed coupon has picked a slot. 🎉</div>';
+      return;
+    }
+    var slotOptions = DASH_SLOTS.map(function(s){ return '<option value="' + s.number + '">Slot ' + s.number + ' (' + s.time + ')</option>'; }).join('');
+    container.innerHTML = rows.map(function(c){
+      var safeCoupon = escapeHtml(c.couponId).replace(/'/g, "\\'");
+      return '<div class="result-row" id="assignRow-' + escapeHtml(c.couponId) + '">' +
+        '<div><b>' + escapeHtml(c.name) + '</b> (' + c.type + ') — ' + escapeHtml(c.couponId) +
+        '<br><span style="color:#888;">' + escapeHtml(c.flat || (c.regId||'')) +
+        (c.phase ? (' ' + escapeHtml(c.phase)) : '') + (c.tower ? (' &middot; ' + escapeHtml(c.tower)) : '') + '</span></div>' +
+        (IS_READONLY ? '' :
+          '<div style="display:flex;gap:6px;align-items:center;">' +
+          '<select id="assignSel-' + escapeHtml(c.couponId) + '">' + slotOptions + '</select>' +
+          '<button class="btn-confirm" onclick="assignSlot(\'' + safeCoupon + '\')">Assign</button>' +
+          '</div>') +
+        '</div>';
+    }).join('');
+  }
+
+  async function assignSlot(couponId){
+    var sel = document.getElementById('assignSel-' + couponId);
+    var slotNumber = sel ? sel.value : '';
+    if(!slotNumber){ alert('Please pick a slot first.'); return; }
+    try{
+      var res = await api('POST', '/api/admin/assign-slot', { pin: PIN, couponId: couponId, slotNumber: slotNumber });
+      if(!res.success){ alert(res.message); return; }
+      await refreshAll();
+    }catch(err){ alert('Error: ' + err.message); }
   }
 
   function applyRegFilter(){ renderAll(); }
