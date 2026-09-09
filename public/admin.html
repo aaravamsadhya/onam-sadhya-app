@@ -51,9 +51,6 @@
   .reg-actions{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;}
   .reg-actions button{flex:1;min-width:140px;}
 
-  /* Collapsible Phase -> Tower grouping for the Confirmed Registrations list. Native
-     <details>/<summary> is used instead of custom JS toggling - it's collapsed by default for
-     free, keyboard accessible, and needs no extra event wiring. */
   details.group-phase{margin-bottom:14px;border:1.5px solid #eee;border-radius:12px;padding:4px 12px 10px;background:#fafafa;}
   details.group-phase > summary{cursor:pointer;font-weight:800;font-size:15px;color:var(--leaf-dark);list-style:none;padding:10px 0;display:flex;align-items:center;gap:8px;}
   details.group-phase > summary::-webkit-details-marker{display:none;}
@@ -106,9 +103,6 @@
   .bulk-filters select{flex:1;padding:10px 12px;border:1.5px solid #ddd;border-radius:8px;font-size:14px;font-family:inherit;background:#fff;}
   .bulk-status{font-size:12px;color:#8a7a4d;margin-top:8px;min-height:16px;}
 
-  /* Off-screen coupon-card template used to render individual/bulk coupon backups - same
-     visual design as the resident-facing coupon page, so what gets handed out at the gate
-     matches what's on the resident's phone. */
   #couponRenderZone{position:fixed;left:-9999px;top:0;}
   #rzCoupon.coupon{width:300px;border-radius:16px;overflow:hidden;border:3px solid var(--gold-dark);background:var(--cream);text-align:center;}
   #rzCoupon .coupon-top,#rzCoupon .coupon-bottom{background:repeating-linear-gradient(135deg,var(--leaf) 0 10px,var(--leaf-dark) 10px 20px);height:10px;}
@@ -325,9 +319,6 @@
       </div>
     </div>
 
-    <!-- Sponsor/Artist tools are used far less often than the day-to-day Pending/Confirmed
-         workflow, so they live down here at the bottom instead of pushing Pending Registrations
-         further down the page where it could get missed. -->
     <div class="card" id="sponsorShareCard" style="border:2px solid #0d6ea8;">
       <h2>📱 Artist / Sponsor Coupons <span class="pill pending" id="sponsorShareCountBadge">0</span></h2>
       <p style="font-size:12px;color:#8a7a4d;margin:0 0 10px;">Grouped by committee SPOC, so every group that person is coordinating goes out in a single WhatsApp message instead of one per group.</p>
@@ -375,6 +366,13 @@
       <div class="msg" id="spMsg"></div>
     </div>
 
+    <div class="card" id="dangerZoneCard" style="border:2px solid #c0392b;">
+      <h2 style="color:#c0392b;">⚠️ Danger Zone</h2>
+      <p style="font-size:12px;color:#8a3b34;margin:0 0 10px;">Only use this once the event is fully wrapped up and you've downloaded the Excel Report as a backup (see the Dashboard card above). This permanently deletes every registration and coupon and resets the numbering back to REG-001 / AAR-001, so the app is a clean slate for next Onam. This cannot be undone.</p>
+      <button class="btn-danger" onclick="resetAllData()" style="width:100%;">🗑 Reset All Data for Next Year</button>
+      <div class="msg" id="resetMsg"></div>
+    </div>
+
   </div>
 </div>
 
@@ -410,9 +408,6 @@
     return r.json();
   }
 
-  // ============== COUPON BACKUP (individual + bulk, for an app outage on event day) ==============
-  // Reuses the same slot colours as the guest coupon page and the scanner, so a backup image or
-  // a printed list still lines up visually/logically with what everyone else has been looking at.
   var SLOT_COLORS = ['#F5B70A', '#0B6E4F', '#8E1B1B', '#1565C0', '#6A3AA8'];
   function slotColor(n){ return SLOT_COLORS[(Number(n) - 1 + SLOT_COLORS.length) % SLOT_COLORS.length]; }
   function slotTextColor(n){ return Number(n) === 1 ? '#3a2a00' : '#fff'; }
@@ -431,15 +426,10 @@
     });
   }
 
-  // Renders one coupon into the off-screen template and captures it as a canvas, matching the
-  // exact visual design the resident sees on their own phone.
   async function renderCouponCanvas(c){
     document.getElementById('rzId').innerText = c.couponId;
     document.getElementById('rzName').innerText = c.name;
     document.getElementById('rzType').innerText = c.type || '';
-    // QR now comes pre-rendered as a PNG from the server (see the qr field on
-    // /api/admin/registrations) instead of being drawn in-browser by a CDN script, which some
-    // ad-blockers/network filters were silently blocking and leaving blank.
     var qrHolder = document.getElementById('rzQr');
     qrHolder.innerHTML = '';
     var qrImg = null;
@@ -469,7 +459,7 @@
       slotEl.style.background = '';
       slotEl.style.color = '';
     }
-    await new Promise(function(r){ setTimeout(r, 120); }); // let the QR finish painting
+    await new Promise(function(r){ setTimeout(r, 120); });
     return html2canvas(document.getElementById('rzCoupon'), { backgroundColor: '#ffffff', scale: 2 });
   }
 
@@ -569,8 +559,6 @@
     statusEl.innerText = 'Done — ' + list.length + ' coupon(s) in the list.';
   }
 
-  // Excel counterpart to the PDF backup list above - same filtered data, same columns, just in a
-  // spreadsheet the committee can sort/filter themselves at the gate if they prefer that to a PDF.
   function bulkDownloadExcel(){
     var list = bulkFilterCoupons();
     var statusEl = document.getElementById('bulkStatus');
@@ -654,7 +642,27 @@
     window.location.href = '/api/admin/export?pin=' + encodeURIComponent(PIN);
   }
 
-  // ============== REVENUE / CASH FLOW ==============
+  async function resetAllData(){
+    if(!confirm('This will permanently delete ALL registrations, coupons, and deleted-registration records, and cannot be undone.\n\nMake sure you have already clicked "Download Excel Report" and saved a backup.\n\nContinue?')) return;
+    var typed = prompt('Type RESET (capital letters) to confirm this irreversible action:');
+    if(typed === null) return;
+    if(typed !== 'RESET'){
+      showMsg('resetMsg', 'Confirmation text did not match. Nothing was deleted.', 'err');
+      return;
+    }
+    try{
+      var res = await api('POST', '/api/admin/reset-all-data', { pin: PIN, confirm: typed });
+      if(res.success){
+        showMsg('resetMsg', 'Done. All registrations and coupons have been cleared. The app is ready for next year.', 'ok');
+        refreshAll();
+      } else {
+        showMsg('resetMsg', res.message || 'Reset failed.', 'err');
+      }
+    }catch(err){
+      showMsg('resetMsg', 'Error: ' + err.message, 'err');
+    }
+  }
+
   async function loadRevenue(){
     var res = await api('GET', '/api/admin/revenue?pin=' + encodeURIComponent(PIN));
     if(!res.success) return;
@@ -687,7 +695,6 @@
     return html;
   }
 
-  // ============== DELETED REGISTRATIONS ==============
   async function loadDeletedRegistrations(){
     var res = await api('GET', '/api/admin/deleted-registrations?pin=' + encodeURIComponent(PIN));
     if(!res.success){ document.getElementById('deletedList').innerHTML = res.message; return; }
@@ -780,7 +787,6 @@
     }catch(err){ alert('Error: ' + err.message); }
   }
 
-  // ============== REGISTRATIONS OPEN/CLOSE (public form gate) ==============
   function renderRegistrationsControl(open){
     var container = document.getElementById('registrationsStatus');
     var statusPill = open
@@ -805,7 +811,6 @@
     }catch(err){ alert('Error: ' + err.message); }
   }
 
-  // ============== SLOT MANAGEMENT (booked/capacity per slot, lock control, drill-down) ==============
   var DASH_SLOTS = [];
 
   function renderSlotManagement(){
@@ -832,10 +837,6 @@
           : '<button class="btn-confirm" onclick="toggleSlotUnlock(' + s.number + ', true)">🔓 Enable Slot ' + s.number + ' Now</button>';
       }
 
-      // Drill-down of every active coupon booked into this slot - reuses COUPON_INDEX, which is
-      // already built from the same registrations data the rest of the page uses, so this needs
-      // no extra server call. Bookings are per-coupon (per person), not per-family, so a
-      // household could show up split across two different slots here - that's expected, not a bug.
       var rows = Object.keys(COUPON_INDEX).map(function(k){ return COUPON_INDEX[k]; })
         .filter(function(c){ return Number(c.slotNumber) === s.number && c.active !== false; })
         .sort(function(a,b){ return (a.flat||'').localeCompare(b.flat||''); });
@@ -894,7 +895,6 @@
     renderAssignMissingSlots();
   }
 
-  // ============== ASSIGN MISSING SLOTS (admin picks a slot for a straggler coupon) ==============
   function renderAssignMissingSlots(){
     var container = document.getElementById('assignSlotsList');
     var rows = Object.keys(COUPON_INDEX).map(function(k){ return COUPON_INDEX[k]; })
@@ -965,11 +965,6 @@
       stat(totalAdults + totalKids, 'Total People') +
       stat('₹' + totalRevenue, 'Revenue Confirmed');
 
-    // Confirmed-but-not-yet-shared resident families, newest confirmation first - this is the
-    // list an admin should check right after confirming a payment, instead of hunting through
-    // the full Confirmed Registrations list below for the one they just added. Sponsor entries
-    // are excluded here - they get their own SPOC-grouped section instead (see below), since
-    // sharing for those happens in bulk, not one registration at a time.
     var awaitingShare = confirmed
       .filter(function(r){ return r.regType !== 'Sponsor' && !r.couponShared; })
       .sort(function(a, b){ return new Date(b.confirmedAt || 0) - new Date(a.confirmedAt || 0); });
@@ -996,11 +991,6 @@
       : '<div class="empty-note">' + (q ? 'No matches.' : 'No rejected registrations.') + '</div>';
   }
 
-  // Confirmed Registrations, grouped Phase -> Tower (collapsed by default, using native
-  // <details>/<summary> so no extra toggle JS is needed). Artist/Sponsor entries have no real
-  // phase/tower, so they get their own group at the end instead of being forced into one.
-  // While a search filter is active, every group is auto-expanded so a match isn't hidden
-  // behind a collapsed section the admin has to remember to click open.
   function renderConfirmedGrouped(confirmed, q){
     var container = document.getElementById('confirmedList');
     if(!confirmed.length){
@@ -1063,8 +1053,6 @@
     return '<a class="phone-link" href="tel:+' + phone + '">' + phone + '</a>';
   }
 
-  // Sponsor entries have no flat/phase/tower - this shows the group/org name + committee/SPOC
-  // instead, so both types render sensibly from the same row templates.
   function sponsorTag(r){
     return r.regType === 'Sponsor' ? '<span class="tower-tag" style="background:#e9e2ff;color:#4a3aa8;">Artist/Sponsor</span>' : '';
   }
@@ -1113,8 +1101,6 @@
   }
 
   function couponRowChip(c){
-    // A coupon can only be usefully downloaded once it has a slot booked - before that it's
-    // just a bare ID with nothing for gate staff to check it against.
     var dl = (c.slotNumber && c.active !== false)
       ? '<button class="chip-dl" onclick="downloadSingleCoupon(\'' + c.couponId + '\')" title="Download this coupon">⬇</button>'
       : '';
@@ -1131,9 +1117,6 @@
     if(IS_READONLY){
       actions = '';
     } else if(isSponsor){
-      // Sponsor coupons are shared in bulk per SPOC from the "Artist/Sponsor Coupons" section
-      // above, not one-by-one here - this just keeps a manual override available in case the
-      // bulk send needs correcting.
       actions = '<div class="reg-actions">' +
         '<button class="btn-manage" onclick="manageReg(\'' + r.regId + '\')">✎ Manage</button>' +
         (r.couponShared
@@ -1190,17 +1173,10 @@
       var res = await api('POST', '/api/admin/confirm', { regId: regId, pin: PIN });
       if(!res.success){ alert(res.message); return; }
       await refreshAll();
-      // Resident coupons auto-open a WhatsApp share right away. Sponsor coupons deliberately
-      // don't - they go out later as one combined message per SPOC from the Artist/Sponsor
-      // Coupons section, not one message per group.
       if(!isSponsor) shareCoupons(regId);
     }catch(err){ alert('Error: ' + err.message); }
   }
 
-  // ============== ARTIST / SPONSOR COUPONS (grouped by SPOC) ==============
-  // One SPOC can be the contact for several separate approved groups (e.g. 3 different
-  // sponsors, all coordinated by the same committee person) - this groups them by phone number
-  // so the admin sends ONE combined WhatsApp message per SPOC instead of one per group.
   function renderSponsorShareSection(sponsorConfirmed){
     var groups = {};
     sponsorConfirmed.forEach(function(r){
@@ -1252,7 +1228,6 @@
     }catch(err){ alert('Error: ' + err.message); }
   }
 
-  // ============== ADD ARTIST / SPONSOR REGISTRATION ==============
   var SP_ADULTS = [''];
   var SP_KIDS = [];
 
@@ -1352,15 +1327,9 @@
       if(!res.success){ alert(res.message); return; }
       var win = window.open(res.waUrl, '_blank');
       if(!win){
-        // Popup got blocked (this happens more often right after "Confirm Payment", since the
-        // window.open call there follows an earlier await and some browsers no longer treat that
-        // as a direct click) - don't mark it shared, since nothing actually opened for the admin to send.
         alert('Your browser blocked the WhatsApp share window. Please allow pop-ups for this site, then click "Share Coupons on WhatsApp" again.');
         return;
       }
-      // The share window opened - mark this registration as shared so it drops out of the
-      // "Awaiting Coupon Share" list, then refresh so every open view (that list, the Confirmed
-      // list) reflects it immediately.
       await api('POST', '/api/admin/mark-coupon-shared', { pin: PIN, regId: regId, shared: true });
       await refreshAll();
     }catch(err){ alert('Error: ' + err.message); }
@@ -1407,7 +1376,6 @@
     if(res.success) doSearch(); else alert(res.message);
   }
 
-  // ============== EDIT / MANAGE REGISTRATIONS ==============
   var MANAGED_REG = null;
 
   function manageReg(regId){
@@ -1455,10 +1423,6 @@
     document.getElementById('manageSaveMsg').style.display = 'none';
   }
 
-  // Headcount is intentionally fixed here - the Edit/Manage form only lets the committee fix a
-  // typo in an existing name, not add or remove people, since the number of adults/kids is what
-  // the payment was collected against. Adding/removing a row would silently desync the paid
-  // total from what's actually checked in at the gate.
   function renderNameFields(containerId, names, placeholder){
     var container = document.getElementById(containerId);
     container.innerHTML = '';
@@ -1522,8 +1486,6 @@
     }
   }
 
-  // Discards any unsaved edits in the Manage form by simply re-loading the same registration -
-  // this puts every field back to the last saved state without touching the server.
   function cancelManageForm(){
     if(!MANAGED_REG) return;
     document.getElementById('manageLookup').value = MANAGED_REG.regId;
